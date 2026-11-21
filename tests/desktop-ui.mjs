@@ -677,6 +677,7 @@ try {
   const card = page
     .locator('.card')
     .filter({ has: page.locator('small', { hasText: 'openai-video' }) })
+  await card.scrollIntoViewIfNeeded()
   await card.locator('img').waitFor({timeout: 15000})
   const poster = await page.evaluate(id => window.__TAURI_INTERNALS__.invoke('video_poster', {id}), film.id)
   assert.ok(poster.path?.endsWith('.png'), 'The video frame should become a reusable disk thumbnail')

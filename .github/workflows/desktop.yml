@@ -68,7 +68,7 @@ jobs:
           $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
           if (-not (Test-Path -LiteralPath $policy)) { New-Item -Path $policy -Force | Out-Null }
           $appName = 'mobius-studio.exe'
-          $previous = Get-ItemPropertyValue -LiteralPath $policy -Name $appName -ErrorAction SilentlyContinue
+          $previous = (Get-Item -LiteralPath $policy).GetValue($appName, $null)
           try {
             New-ItemProperty -LiteralPath $policy -Name $appName -PropertyType String -Value '--remote-debugging-address=127.0.0.1 --remote-debugging-port=0' -Force | Out-Null
             node tests/desktop-ui.mjs (Join-Path $dest $appName)

@@ -137,12 +137,19 @@ pub fn write_output(
                 .resize(w, h, imageops::FilterType::Lanczos3)
                 .to_rgba8();
             let mut canvas = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 255]));
-            imageops::overlay(
-                &mut canvas,
-                &inner,
-                i64::from((w - inner.width()) / 2),
-                i64::from((h - inner.height()) / 2),
-            );
+            let left = (w - inner.width()) / 2;
+            let top = (h - inner.height()) / 2;
+            for (x, y, &pixel) in inner.enumerate_pixels() {
+                let mut opaque = pixel;
+                let alpha = u16::from(pixel[3]);
+                if alpha < 255 {
+                    for channel in &mut opaque.0[..3] {
+                        *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+                    }
+                    opaque[3] = 255;
+                }
+                canvas.put_pixel(left + x, top + y, opaque);
+            }
             DynamicImage::ImageRgba8(canvas)
         };
         out.write_to(target.as_file_mut(), ImageFormat::Png)

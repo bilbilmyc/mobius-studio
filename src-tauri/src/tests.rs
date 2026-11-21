@@ -306,3 +306,26 @@ fn exports_exact_dimensions_and_preserves_the_original() {
     .validate()
     .is_err());
 }
+
+#[test]
+fn contain_export_composites_every_pixel_onto_opaque_black() {
+    use crate::export::{write_copy, Resize};
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source.png");
+    let target = tmp.path().join("output.png");
+    image::RgbaImage::from_raw(1, 3, vec![200, 0, 0, 128, 91, 52, 13, 0, 0, 0, 240, 255])
+        .unwrap()
+        .save(&source)
+        .unwrap();
+    let spec = Resize {
+        width: 3,
+        height: 3,
+        fit: "contain".into(),
+    };
+    write_copy(&source, &target, Some(&spec)).unwrap();
+    let pixels = image::open(target).unwrap().to_rgba8();
+    assert_eq!(pixels.get_pixel(1, 0).0, [100, 0, 0, 255]);
+    assert_eq!(pixels.get_pixel(1, 1).0, [0, 0, 0, 255]);
+    assert_eq!(pixels.get_pixel(1, 2).0, [0, 0, 240, 255]);
+    assert_eq!(pixels.get_pixel(0, 0).0, [0, 0, 0, 255]);
+}
