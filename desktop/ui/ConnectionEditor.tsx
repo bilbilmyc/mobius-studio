@@ -14,6 +14,7 @@ import {
   type RelayMap,
 } from '../shared'
 import { Modal } from './Editor'
+import { ModelPicker, useModelCatalog } from './ModelPicker'
 import {
   WorkflowSettings,
   ControlSettings,
@@ -51,12 +52,15 @@ export function ConnectionEditor({
       () => profile?.Relay ?? defaultRelay(kind),
     ),
     [err, error] = useState(''),
-    [busy, work] = useState(false),
-    [models, modelList] = useState<string[]>([])
+    [busy, work] = useState(false)
+  const catalog = useModelCatalog({
+    source: 'connection', id: p.id, base: p.base, key: p.key,
+    auth: isCustom(p.protocol) ? relay.auth : 'bearer',
+  })
+  const models = catalog.models ?? []
   const [additional, setAdditional] = useState(profile?.Models?.join('\n') ?? '')
   const patch = (k: keyof EditProfile, v: string) => {
     set((old) => ({ ...old, ...(k === 'base' && v !== old.base ? { key: '' } : {}), [k]: v }))
-    if (k === 'base') modelList([])
   }
   const [controls, setControls] = useState(
     () => profile?.Controls ?? emptyControls(),
@@ -72,26 +76,20 @@ export function ConnectionEditor({
     setRelay(defaultRelay(mediaKind(id)))
     setControls(emptyControls())
     setAdditional('')
-    modelList([])
     error('')
   }
-  async function run(action: 'save' | 'models') {
+  async function save() {
     work(true)
     error('')
     try {
       const input = {
         ...p,
+        base: official ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
         models: official ? undefined : additional.split(/[\n,，]+/).map((s) => s.trim()).filter(Boolean),
         controls: official ? undefined : controls,
         relay: isCustom(p.protocol) ? relay : undefined,
       }
-      if (action === 'save') {
-        await saved(await window.studio.save(input))
-      } else {
-        const list = await window.studio.models(input)
-        modelList(list)
-        if (!list.length) error('服务返回了空模型列表，可以手动填写模型 ID。')
-      }
+      await saved(await window.studio.save(input))
     } catch (e) {
       error(e instanceof Error ? e.message : String(e))
     } finally {
@@ -118,7 +116,7 @@ export function ConnectionEditor({
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          void run('save')
+          void save()
         }}
       >
         <div className="dialog-body fields">
@@ -168,36 +166,21 @@ export function ConnectionEditor({
               {p.protocol === 'openai-image' && p.base !== 'https://api.openai.com/v1' && (
                 <button type="button" className="link align-left" onClick={() => patch('base', 'https://api.openai.com/v1')}>使用 OpenAI 官方地址</button>
               )}
-              <label>
-                模型 ID
-                <input
-                  required
-                  list="model-names"
-                  value={p.model}
-                  placeholder="模型厂商或中转站提供的模型名称"
-                  onChange={(e) => patch('model', e.target.value)}
-                />
-                <datalist id="model-names">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </label>
-              {models.length > 0 && (
-                <label>
-                  已读取的模型
-                  <select
-                    aria-label="从服务商选择模型"
-                    value={models.includes(p.model) ? p.model : ''}
-                    onChange={(e) => patch('model', e.target.value)}
-                  >
-                    <option value="">选择模型</option>
-                    {models.map((m) => (
-                      <option key={m}>{m}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
+            </>
+          )}
+          <label>
+            API Key
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={p.key}
+              placeholder={profile?.hasKey ? '同一地址留空可沿用已保存的 Key' : '填写此服务签发的 Key'}
+              onChange={(e) => patch('key', e.target.value)}
+            />
+          </label>
+          {!official && <>
+              <ModelPicker label="模型 ID" value={p.model} change={value => patch('model', value)}
+                catalog={catalog} canFetch={!!p.base.trim()} disabled={busy} />
               <details>
                 <summary>同一连接的其他模型</summary>
                 <label>
@@ -219,22 +202,7 @@ export function ConnectionEditor({
                   </label>
                 )}
               </details>
-            </>
-          )}
-          <label>
-            API Key
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={p.key}
-              placeholder={
-                profile?.hasKey
-                  ? '同一地址留空可沿用已保存的 Key'
-                  : '填写此服务签发的 Key'
-              }
-              onChange={(e) => patch('key', e.target.value)}
-            />
-          </label>
+          </>}
           <small>{storage}</small>
           <label className="check">
             <input
@@ -244,16 +212,6 @@ export function ConnectionEditor({
             />
             新填的 Key 仅在本次打开期间使用
           </label>
-          {!official && (
-            <button
-              type="button"
-              className="link align-left"
-              disabled={busy || !p.base}
-              onClick={() => void run('models')}
-            >
-              读取服务商模型列表
-            </button>
-          )}
           {isCustom(p.protocol) && (
             <fieldset>
               <legend>接口映射</legend>
@@ -384,7 +342,7 @@ export function ConnectionEditor({
           <button type="button" onClick={close}>
             取消
           </button>
-          <button className="primary" disabled={busy}>
+          <button className="primary" disabled={busy || catalog.loading}>
             {busy ? '处理中…' : '保存连接'}
           </button>
         </footer>

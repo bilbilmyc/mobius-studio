@@ -17,6 +17,7 @@ const api: Bridge = {
   save: (input) => invoke('edit_profile', { input }),
   remove: (id) => invoke('remove_profile', { id }),
   models: (input) => invoke('list_models', { input }),
+  discoverModels: (input) => invoke('discover_models', { input }),
   pick: (kind, multiple) => invoke('pick_files', { kind, multiple }),
   drop: (kind, paths) => invoke('add_files', { kind, paths }),
   frame: (id) => invoke('job_frame', { id }),

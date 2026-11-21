@@ -1,5 +1,10 @@
 [hidden] { display: none !important; }
 .media-switch { width: 174px; }
+.model-picker { display: grid; gap: 5px; min-width: 0; }
+.model-picker-heading, .model-picker-feedback { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.model-picker-heading button { padding: 4px 10px; }
+.model-picker-feedback:has(> span:empty:only-child) { display: none; }
+.model-picker-feedback .error { overflow-wrap: anywhere; }
 .preferences, .script-desk {
   display: grid;
   align-content: start;

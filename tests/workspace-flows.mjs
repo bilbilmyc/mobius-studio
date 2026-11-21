@@ -26,15 +26,21 @@ export function verifyPut(req, url) {
 
 export function workspaceMock(png) {
   const uploads = []
-  let scripts = 0
+  let scripts = 0, writerLists = 0
   return {
     uploads,
     handle(req, res, bytes) {
+      if (req.url === '/v1/models' && req.headers.authorization === 'Bearer writer-ui-fixture') {
+        assert.equal(req.method, 'GET')
+        writerLists++
+        res.end(JSON.stringify({ data: [{ id: 'studio-writer-from-list' }, { id: 'deepseek-v4-pro' }, { id: 'studio-writer-from-list' }] }))
+        return true
+      }
       if (req.url === '/v1/chat/completions') {
         assert.equal(req.method, 'POST')
         assert.equal(req.headers.authorization, 'Bearer writer-ui-fixture')
         const body = JSON.parse(bytes)
-        assert.equal(body.model, 'deepseek-v4-pro')
+        assert.equal(body.model, 'studio-writer-from-list')
         assert.equal(body.response_format.type, 'json_object')
         assert.ok(body.messages[1].content.includes(brief))
         const content = JSON.stringify({ title: '晨渡', scenes: [scene, { ...scene, heading: '对岸 · 日出' }] })
@@ -58,6 +64,7 @@ export function workspaceMock(png) {
     },
     check() {
       assert.equal(scripts, 1)
+      assert.equal(writerLists, 2)
       assert.equal(uploads.length, 3)
       assert.equal(uploads[0], uploads[1])
       assert.notEqual(uploads[0], uploads[2])
@@ -71,10 +78,42 @@ export async function exerciseWorkspace({ page, base, oldId, shot, state, mock }
   await page.getByLabel('故事构想').fill(brief)
   await page.getByLabel('分镜数量').selectOption('2')
   await button('配置剧本模型').click()
-  await page.getByLabel('剧本服务地址').fill(base)
+  // Hold the previous directory response until the new connection has returned its list.
+  const previous = new URL('/previous-service', base).href
+  await page.evaluate(url => {
+    const real = window.studio.discoverModels
+    window.studio.discoverModels = query => {
+      if (query.base !== url) return real(query)
+      window.studio.discoverModels = real
+      return new Promise(resolve => {
+        window.finishPreviousCatalog = () => resolve({ base: url, models: ['stale-model'] })
+      })
+    }
+  }, previous)
+  await page.getByLabel('剧本服务地址').fill(previous)
+  await page.getByLabel('剧本 API Key').fill('previous-fixture')
+  await button('获取模型列表').click()
+  await button('正在获取…').waitFor()
+  await page.getByLabel('剧本服务地址').fill(new URL(base).origin)
+  assert.equal(await page.getByLabel('剧本 API Key').inputValue(), '')
   await page.getByLabel('剧本 API Key').fill('writer-ui-fixture')
+  await button('获取模型列表').click()
+  const listed = page.getByRole('combobox', { name: '从服务商选择模型' })
+  await listed.selectOption('studio-writer-from-list')
+  await page.evaluate(async () => {
+    window.finishPreviousCatalog()
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  })
+  assert.equal(await listed.inputValue(), 'studio-writer-from-list')
+  assert.equal(await listed.locator('option').count(), 2)
+  await shot('剧本模型列表')
   await button('保存剧本模型').click()
   await page.getByText('设置已保存。', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('剧本服务地址').inputValue(), base)
+  assert.equal(await page.getByLabel('剧本 API Key').inputValue(), '')
+  await button('获取模型列表').click()
+  await listed.waitFor()
+  assert.equal(await listed.inputValue(), 'studio-writer-from-list')
   await button('剧本').click()
   assert.equal(await page.getByLabel('故事构想').inputValue(), brief)
   await button('生成剧本').click()

@@ -81,7 +81,7 @@ fn text(data: &Value, path: &str) -> Option<String> {
         _ => None,
     }
 }
-fn auth(r: RequestBuilder, scheme: &str, key: &str) -> RequestBuilder {
+pub(crate) fn auth(r: RequestBuilder, scheme: &str, key: &str) -> RequestBuilder {
     if key.is_empty() {
         return r;
     }
@@ -100,6 +100,11 @@ pub(crate) async fn json_response(request: RequestBuilder, key: &str) -> Reply<V
         .send()
         .await
         .map_err(|e| Fault::uncertain(e.without_url()))?;
+    response_json(reply, key)
+        .await?
+        .ok_or_else(|| Fault::uncertain("服务返回的内容不是 JSON，请核对地址和协议。"))
+}
+pub(crate) async fn response_json(reply: reqwest::Response, key: &str) -> Reply<Option<Value>> {
     let status = reply.status();
     let raw = reply
         .bytes()
@@ -117,7 +122,7 @@ pub(crate) async fn json_response(request: RequestBuilder, key: &str) -> Reply<V
             definite: status.is_client_error() && status.as_u16() != 408,
         });
     }
-    value.map_err(|_| Fault::uncertain("服务返回的内容不是 JSON，请核对地址和协议。"))
+    Ok(value.ok())
 }
 fn envelope(v: Value, key: &str) -> Reply<Value> {
     let code = text(&v, "code")
@@ -146,20 +151,6 @@ fn media(v: &Value, url: &str, b64: &str) -> Option<Output> {
     text(v, b64)
         .map(Output::Inline)
         .or_else(|| text(v, url).map(Output::Url))
-}
-pub async fn models(h: &Client, base: &str, scheme: &str, key: &str) -> Reply<Vec<String>> {
-    let v = json_response(auth(h.get(route(base, "models")?), scheme, key), key).await?;
-    let list = v["data"]
-        .as_array()
-        .or_else(|| v.as_array())
-        .ok_or_else(|| Fault::known("此服务没有返回兼容的模型列表，可手动填写模型 ID。"))?;
-    let mut ids: Vec<_> = list
-        .iter()
-        .filter_map(|v| v["id"].as_str().or_else(|| v.as_str()).map(str::to_string))
-        .collect();
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
 }
 pub async fn upload(h: &Client, j: &Job, key: &str, a: &Asset, path: &Path) -> Reply<String> {
     let (_, mime) = mime(path).ok_or_else(|| Fault::known("素材类型无效"))?;

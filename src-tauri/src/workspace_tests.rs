@@ -1,4 +1,5 @@
 use crate::{
+    catalog::{Lookup, Source},
     jobs::Studio,
     model::{id, Job},
     preferences::{StorageTarget, WriterInput},
@@ -15,6 +16,153 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+
+#[tokio::test]
+async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
+    let legacy_hits = Arc::new(AtomicUsize::new(0));
+    let seen = legacy_hits.clone();
+    let router = Router::new().fallback(move |request: Request| {
+        let seen = seen.clone();
+        async move {
+            assert_eq!(request.method(), "GET");
+            let headers = request.headers();
+            let bearer = headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let (status, body) = match request.uri().path() {
+                "/v1/models" if bearer == "Bearer unversioned" => (404, Value::Null),
+                "/v1/models" if bearer == "Bearer spa" => {
+                    return Response::new(Body::from("<html>service home</html>"));
+                }
+                "/v1/models" if bearer == "Bearer invalid-key" => {
+                    (401, json!({"error":{"message":"invalid-key rejected"}}))
+                }
+                "/v1/models" if bearer == "Bearer writer-key" => (
+                    200,
+                    json!({"data":[{"id":" z "},{"id":"a"},"a",{"id":" "},{}]}),
+                ),
+                "/models" => {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    (200, json!(["legacy"]))
+                }
+                "/tenant/api/v3/models"
+                    if headers.get("x-api-key").is_some_and(|v| v == "media-key") =>
+                {
+                    (200, json!({"models":[{"id":"media"}]}))
+                }
+                "/tenant/api/v3/models"
+                    if bearer.is_empty() && !headers.contains_key("x-api-key") =>
+                {
+                    (200, json!({"data":[]}))
+                }
+                _ => (403, Value::Null),
+            };
+            Response::builder()
+                .status(status)
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let versioned = format!("{origin}/v1");
+    let tenant = format!("{origin}/tenant/api/v3");
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let home = tempfile::tempdir().unwrap();
+    let studio = Studio::new(Store::new(home.path().into()).unwrap(), || {}).unwrap();
+    studio
+        .store
+        .save_writer(WriterInput {
+            base: origin.clone(),
+            model: "a".into(),
+            key: "writer-key".into(),
+        })
+        .unwrap();
+    let media = studio.store.edit(serde_json::from_value(json!({
+        "name":"media", "protocol":"openai-image", "base":tenant, "model":"media","key":"media-key","sessionOnly":true
+    })).unwrap()).unwrap();
+    let writer = |base: &str, key: &str| Lookup {
+        source: Source::Writer,
+        base: base.into(),
+        key: key.into(),
+    };
+    let media_query = |base: &str| Lookup {
+        source: Source::Connection {
+            id: Some(media.clone()),
+            auth: Some("x-api-key".into()),
+        },
+        base: base.into(),
+        key: String::new(),
+    };
+
+    let result = studio
+        .discover_models(writer(&format!("{origin}/"), ""))
+        .await
+        .unwrap();
+    assert_eq!(result.models, ["a", "z"]);
+    assert_eq!(result.base, versioned);
+    let explicit = studio
+        .discover_models(writer(&format!("{versioned}/"), "writer-key"))
+        .await
+        .unwrap();
+    assert_eq!(explicit.models, result.models);
+    let custom = studio.discover_models(media_query(&tenant)).await.unwrap();
+    assert_eq!(custom.models, ["media"]);
+    assert_eq!(custom.base, tenant);
+    let full = studio
+        .discover_models(media_query(&format!("{tenant}/models/")))
+        .await
+        .unwrap();
+    assert_eq!(full.base, tenant);
+    assert_eq!(full.models, custom.models);
+    assert!(studio
+        .discover_models(writer(&tenant, ""))
+        .await
+        .unwrap()
+        .models
+        .is_empty());
+    assert!(studio.discover_models(media_query(&origin)).await.is_err());
+
+    let legacy = studio
+        .discover_models(writer(&origin, "unversioned"))
+        .await
+        .unwrap();
+    assert_eq!(legacy.base, origin);
+    assert_eq!(legacy.models, ["legacy"]);
+    assert_eq!(
+        studio
+            .discover_models(writer(&origin, "spa"))
+            .await
+            .unwrap()
+            .models,
+        ["legacy"]
+    );
+    assert_eq!(
+        studio
+            .discover_models(writer(&format!("{origin}/models"), "invalid-key"))
+            .await
+            .unwrap()
+            .models,
+        ["legacy"]
+    );
+    let rejected = studio
+        .discover_models(writer(&origin, "invalid-key"))
+        .await
+        .err()
+        .unwrap();
+    assert!(rejected.contains("401") && !rejected.contains("invalid-key"));
+    assert_eq!(legacy_hits.load(Ordering::SeqCst), 3);
+    studio
+        .store
+        .save_writer(WriterInput {
+            base: tenant,
+            model: "a".into(),
+            key: String::new(),
+        })
+        .unwrap();
+    server.abort();
+}
 
 #[tokio::test]
 async fn screenplay_json_is_editable_and_scoped_to_the_writer() {

@@ -42,6 +42,11 @@ export function creationMock({ clip, still, png }) {
         })),
       )
     calls.push({ method: req.method, url })
+    if (url === '/v1/models') {
+      assert.equal(req.method, 'GET')
+      assert.equal(req.headers['x-api-key'], 'matrix-key')
+      return reply({ data: [{ id: 'frame-model' }] })
+    }
     if (url === '/v1/upload/presign')
       return reply({
         code: 200,
@@ -407,10 +412,11 @@ export async function exerciseCreation({
   const dlg = page.getByRole('dialog')
   await dlg.getByLabel('连接名称').fill('关键帧测试站')
   await dlg.getByLabel('接口协议').selectOption('relay-video')
-  await dlg.getByLabel('服务根地址').fill(base)
-  await dlg.getByLabel('模型 ID', { exact: true }).fill('frame-model')
+  await dlg.getByLabel('服务根地址').fill(base + '/models')
   await dlg.getByLabel('API Key', { exact: true }).fill('matrix-key')
   await dlg.getByLabel('认证方式').selectOption('x-api-key')
+  await dlg.getByRole('button', { name: '获取模型列表' }).click()
+  await dlg.getByLabel('从服务商选择模型').selectOption('frame-model')
   await dlg.getByLabel('轮询路径', { exact: true }).fill('matrix/status/{id}')
   await dlg.getByLabel('首尾帧视频', { exact: true }).check()
   await dlg.getByLabel('首尾帧视频提交路径').fill('matrix/{model}/transition')
@@ -430,6 +436,7 @@ export async function exerciseCreation({
   const expectedConnection = (await state()).profiles.find(
     (p) => p.Name === '关键帧测试站',
   )
+  assert.equal(expectedConnection.BaseUrl, base)
   assert.ok(
     expectedConnection.Relay.workflows.first_last.body.includes(
       '{{resolution}}',

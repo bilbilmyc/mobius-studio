@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { presets, profileModels, type Integrations, type ProfileView, type StorageTarget } from '../shared'
+import { ModelPicker, useModelCatalog } from './ModelPicker'
 
 const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', files: '文件与工具' }
 export type SettingsSection = keyof typeof sections
@@ -73,17 +74,21 @@ function useSave(reload: () => Promise<void>) {
 
 function WriterForm({ data, reload }: { data: Integrations['writer']; reload: Props['reload'] }) {
   const [base, setBase] = useState(data.base), [model, setModel] = useState(data.model), [key, setKey] = useState('')
+  const catalog = useModelCatalog({ source: 'writer', base, key })
   const { submit, busy, feedback } = useSave(reload)
   return <form className="integration-form" onSubmit={e => void submit(e, async () => {
-    await window.studio.saveWriter({ base, model, key }); setKey('')
+    const apiBase = catalog.baseForSave(data.hasKey ? data.base : undefined, true)
+    await window.studio.saveWriter({ base: apiBase, model, key })
+    setBase(apiBase.trim().replace(/\/+$/, ''))
+    setKey('')
   })}>
     <p>DeepSeek V4 可将故事构想写成分镜。也可填写支持 JSON 输出的 Chat Completions 兼容服务。</p>
-    <label>剧本服务地址<input type="url" required value={base} onChange={e => setBase(e.target.value)} /></label>
-    <label>剧本模型 ID<input required list="writing-models" value={model} onChange={e => setModel(e.target.value)} /></label>
-    <datalist id="writing-models"><option value="deepseek-v4-pro" /><option value="deepseek-flash" /></datalist>
-    <label>剧本 API Key<input type="password" autoComplete="new-password" value={key} onChange={e => setKey(e.target.value)}
+    <label>剧本服务地址<input type="url" required disabled={busy} value={base} onChange={e => { setBase(e.target.value); setKey('') }} /></label>
+    <label>剧本 API Key<input type="password" autoComplete="new-password" disabled={busy} value={key} onChange={e => setKey(e.target.value)}
       placeholder={data.hasKey && base.trim().replace(/\/+$/, '') === data.base ? '已保存，留空沿用' : '输入这个服务的 API Key'} /></label>
-    <div className="form-end"><button className="primary" disabled={busy}>保存剧本模型</button>{feedback}</div>
+    <ModelPicker label="剧本模型 ID" value={model} change={setModel} catalog={catalog}
+      canFetch={!!base.trim()} disabled={busy} hints={base.trim().replace(/\/+$/, '') === 'https://api.deepseek.com' ? ['deepseek-v4-pro', 'deepseek-flash'] : undefined} />
+    <div className="form-end"><button className="primary" disabled={busy || catalog.loading}>保存剧本模型</button>{feedback}</div>
   </form>
 }
 

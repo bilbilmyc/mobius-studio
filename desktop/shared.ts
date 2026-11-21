@@ -294,6 +294,17 @@ export interface EditProfile {
   key: string
   relay?: RelayMap
 }
+export interface ModelLookup {
+  source: 'writer' | 'connection'
+  base: string
+  key: string
+  id?: string
+  auth?: RelayMap['auth']
+}
+export interface ModelCatalog {
+  base: string
+  models: string[]
+}
 export interface Job {
   Id: string
   ProfileId: string
@@ -457,6 +468,7 @@ export interface Bridge {
   save(input: EditProfile): Promise<string>
   remove(id: string): Promise<void>
   models(input: EditProfile): Promise<string[]>
+  discoverModels(input: ModelLookup): Promise<ModelCatalog>
   pick(kind: Kind, multiple: boolean): Promise<Picked[]>
   drop(kind: Kind, paths: string[]): Promise<Picked[]>
   frame(id: string): Promise<Picked>

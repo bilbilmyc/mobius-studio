@@ -20,7 +20,7 @@
 
 ## 剧本与分镜
 
-在「设置 → 剧本模型」填写 DeepSeek API Key。默认使用 `https://api.deepseek.com` 与 `deepseek-v4-pro`。也可选择 `deepseek-flash`，或使用支持 Chat Completions 和 JSON 输出的兼容服务。[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)
+在「设置 → 剧本模型」填写服务地址和 API Key，点击「获取模型列表」，选中模型后保存。默认使用 `https://api.deepseek.com` 与 `deepseek-v4-pro`。也可选择 `deepseek-flash`，或使用支持 Chat Completions 和 JSON 输出的兼容服务。[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)
 
 在「剧本」写下故事构想并选择分镜数。生成后的剧本自动保存在 `Data/剧本`，可以随时打开、编辑并保存。每镜包含场景、动作、台词、图片和视频提示词。点击「用于生图」或「用于视频」可将该镜提示词带入创作台，确认参数后再生成。
 
@@ -40,9 +40,9 @@
 
 ## 模型厂商与第三方中转站
 
-打开「设置 → 图片与视频 → 添加模型服务」，选择接口协议，填写服务根地址、模型 ID 和该服务签发的 Key。直连 OpenAI 图片接口可点击「使用 OpenAI 官方地址」，万相填写百炼工作空间的服务地址，方舟预设使用北京区地址。使用第三方中转站时填该站的地址和模型 ID。例如，提交地址是 `https://relay.example/v1/images/generations`，根地址即 `https://relay.example/v1`。
+打开「设置 → 图片与视频 → 添加模型服务」，选择接口协议，填写服务根地址和该服务签发的 Key，点击「获取模型列表」选择模型。直连 OpenAI 图片接口可点击「使用 OpenAI 官方地址」，万相填写百炼工作空间的服务地址，方舟预设使用北京区地址。使用第三方中转站时填该站的地址和模型 ID。例如，提交地址是 `https://relay.example/v1/images/generations`，根地址即 `https://relay.example/v1`。
 
-支持模型目录的服务可点击「读取服务商模型列表」，其他服务可手动输入。在「同一连接的其他模型」添加使用相同协议和输出参数的模型后，创作台可直接切换「生成模型」。每条任务记录实际使用的模型，复用参数时也会选回该模型。同一站点提供不同接口、图片与视频，或模型所需参数不同时，可分别配置连接。账户开通的模型和支持的创作方式由各服务商决定。
+只填域名时，客户端先请求 `GET /v1/models`。遇到 404、405，或服务返回网页等非模型目录内容时，会再试 `/models`。地址已含 `/v1`、`/api/v3` 等前缀时，客户端会在该前缀下读取 `models`。也可直接填写完整的模型列表地址，如 `https://relay.example/v1/models`。已有连接可沿用同一地址保存的 Key。服务没有提供模型列表时仍可手动填写。在「同一连接的其他模型」添加使用相同协议和输出参数的模型后，创作台可直接切换「生成模型」。每条任务记录实际使用的模型，复用参数时也会选回该模型。同一站点提供不同接口、图片与视频，或模型所需参数不同时，可分别配置连接。账户开通的模型和支持的创作方式由各服务商决定。
 
 | 接口协议 | 客户端支持 |
 | --- | --- |

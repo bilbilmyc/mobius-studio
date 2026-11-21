@@ -1,3 +1,4 @@
+mod catalog;
 mod creation;
 mod export;
 mod inputs;
@@ -112,29 +113,22 @@ fn remove_profile(s: Core, id: String) -> Result<()> {
     Ok(())
 }
 #[tauri::command]
+async fn discover_models(s: Core<'_>, input: catalog::Lookup) -> Result<catalog::Catalog> {
+    s.discover_models(input).await
+}
+#[tauri::command]
 async fn list_models(s: Core<'_>, input: Edit) -> Result<Vec<String>> {
-    let base = canonical_base(&input.base)?;
-    let mut key = input.key;
-    if key.is_empty() {
-        if let Some(id) = input.id {
-            if let Some(p) = s
-                .store
-                .profiles()?
-                .into_iter()
-                .find(|p| p.id == id && p.base_url == base)
-            {
-                key = s.store.vault.get(&p, &base)?;
-            }
-        }
-    }
-    let scheme = input
-        .relay
-        .as_ref()
-        .map(|r| r.auth.as_str())
-        .unwrap_or("bearer");
-    provider::models(&s.http, &base, scheme, &key)
-        .await
-        .map_err(|e| e.message)
+    let catalog = s
+        .discover_models(catalog::Lookup {
+            base: input.base,
+            key: input.key,
+            source: catalog::Source::Connection {
+                id: input.id,
+                auth: input.relay.map(|r| r.auth),
+            },
+        })
+        .await?;
+    Ok(catalog.models)
 }
 #[tauri::command]
 fn add_link(s: Core, kind: String, url: String) -> Result<Picked> {
@@ -427,6 +421,7 @@ pub fn run() {
             edit_script,
             edit_profile,
             remove_profile,
+            discover_models,
             list_models,
             pick_files,
             add_files,
