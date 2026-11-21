@@ -54,7 +54,9 @@ jobs:
       - run: npm run installer -- --arch=${{ matrix.arch }}
       - run: npm run build
       - run: cargo test --locked --release --features custom-protocol,installed --manifest-path src-tauri/Cargo.toml
-      - if: runner.os == 'Windows'
+      - name: Install and test the Windows application
+        id: windows-ui
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg --yes --no-progress }
@@ -62,10 +64,28 @@ jobs:
           $dest = Join-Path $env:RUNNER_TEMP 'mobius-install-test'
           $installed = Start-Process -FilePath $setup.FullName -ArgumentList "/S /D=$dest" -Wait -PassThru -WindowStyle Hidden
           if ($installed.ExitCode) { throw "Installer failed ($($installed.ExitCode))" }
-          node tests/desktop-ui.mjs (Join-Path $dest 'mobius-studio.exe')
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Elevated WebView2 hosts on the runner read browser flags from machine policy.
+          $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          if (-not (Test-Path -LiteralPath $policy)) { New-Item -Path $policy -Force | Out-Null }
+          $appName = 'mobius-studio.exe'
+          $previous = Get-ItemPropertyValue -LiteralPath $policy -Name $appName -ErrorAction SilentlyContinue
+          try {
+            New-ItemProperty -LiteralPath $policy -Name $appName -PropertyType String -Value '--remote-debugging-address=127.0.0.1 --remote-debugging-port=0' -Force | Out-Null
+            node tests/desktop-ui.mjs (Join-Path $dest $appName)
+            if ($LASTEXITCODE) { throw "Desktop UI tests failed ($LASTEXITCODE)" }
+          } finally {
+            if ($null -eq $previous) { Remove-ItemProperty -LiteralPath $policy -Name $appName -ErrorAction SilentlyContinue }
+            else { Set-ItemProperty -LiteralPath $policy -Name $appName -Value $previous }
+          }
           $removed = Start-Process -FilePath (Join-Path $dest 'uninstall.exe') -ArgumentList "/S _?=$dest" -Wait -PassThru -WindowStyle Hidden
           if ($removed.ExitCode -or (Test-Path -LiteralPath (Join-Path $dest 'mobius-studio.exe'))) { throw "Uninstall failed" }
+      - name: Keep the exact installer for a failed Windows UI test
+        if: failure() && steps.windows-ui.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-${{ matrix.arch }}-UI-test-input
+          path: dist/*-setup.exe
+          retention-days: 1
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y ./dist/*.deb

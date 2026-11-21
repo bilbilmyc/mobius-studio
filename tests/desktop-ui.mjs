@@ -82,21 +82,21 @@ async function stop() {
   browser = undefined
 }
 async function start() {
-  const socket = await listen(() => {}),
-    endpoint = origin(socket),
-    port = socket.address().port
-  await closeServer(socket)
+  const webview = await mkdtemp(path.join(temp, 'WebView-'))
+  let endpoint = '', uiReady = false
   child = spawn(exe, [], {
     cwd: temp,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
       MOBIUS_HOME: data,
-      WEBVIEW2_USER_DATA_FOLDER: path.join(temp, 'WebView'),
+      MOBIUS_SMOKE_TEST: '1',
+      WEBVIEW2_USER_DATA_FOLDER: webview,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
-        '--remote-debugging-address=127.0.0.1 --remote-debugging-port=' + port,
+        '--remote-debugging-address=127.0.0.1 --remote-debugging-port=0',
     },
   })
+  child.stderr.on('data', chunk => { if (chunk.toString().includes('MOBIUS_WEBVIEW_READY')) uiReady = true })
   let targets = []
   for (let i = 0; i < 120; i++) {
     if (child.exitCode !== null)
@@ -104,6 +104,11 @@ async function start() {
         'QA instance exited before providing a WebView. Close other Tauri copies first.',
       )
     try {
+      if (!endpoint) {
+        const activePort = await readFile(path.join(webview, 'EBWebView', 'DevToolsActivePort'), 'utf8')
+        const port = Number(activePort.split(/\r?\n/, 1)[0])
+        if (Number.isInteger(port) && port > 0 && port <= 65535) endpoint = 'http://127.0.0.1:' + port
+      }
       targets = await (await fetch(endpoint + '/json/list')).json()
       if (
         targets.some(
@@ -116,7 +121,7 @@ async function start() {
   }
   assert.ok(
     targets.some((t) => t.type === 'page' && t.url.includes('tauri.localhost')),
-    'packaged WebView was not ready',
+    'Packaged WebView target unavailable. Native UI ready: ' + uiReady + ', debug port discovered: ' + Boolean(endpoint),
   )
   browser = await chromium.connectOverCDP(endpoint)
   page = undefined
