@@ -167,6 +167,15 @@ async fn permanent_poll_errors_pause_immediately_and_submissions_are_never_repos
         .await
         .unwrap();
         assert_eq!(saved.remote_id.as_deref(), ticket);
+        assert_eq!(
+            saved.stopped_during.as_deref(),
+            Some(if ticket.is_some() {
+                "waiting"
+            } else {
+                "submitting"
+            })
+        );
+        assert!(saved.progress_at.is_some());
         let calls_seen = requests.lock().unwrap();
         assert_eq!(calls_seen.len(), calls);
         let verb = if ticket.is_some() { "GET" } else { "POST" };

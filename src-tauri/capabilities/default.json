@@ -1,1 +1,1 @@
-{"identifier":"studio","description":"本地工作台的窗口事件","windows":["main"],"permissions":["core:default"]}
+{"identifier":"studio","description":"本地工作台的窗口事件","windows":["main"],"permissions":["core:default","core:window:allow-destroy"]}

@@ -346,6 +346,9 @@ export interface JobView {
   detail: string
   remoteId: string
   retryAt?: number | null
+  progressAt?: number | null
+  stoppedDuring?: string | null
+  hasResultUrl?: boolean
   created: number
   file: boolean
   mediaPath?: string
@@ -365,6 +368,7 @@ export interface Start {
   assets: Picked[]
 }
 export interface State {
+  comparisons: Comparison[]
   profiles: ProfileView[]
   official: ProfileView
   jobs: JobView[]
@@ -411,6 +415,36 @@ export interface Script extends Screenplay {
   model: string
 }
 export interface ShotLink { scriptId: string; sceneId: string; label: string }
+export interface ModelDraft {
+  config: Record<string, Value>
+  priority: number
+  size: string
+  seconds: number
+  manualSize?: boolean
+  intent?: string
+  byMode: Record<string, Picked[]>
+}
+export interface Composer {
+  generationOptimization?: OptimizationMode
+  appliedOptimization?: OptimizedPrompt
+  suggestion?: PromptSuggestion
+  promptBeforeOptimization?: string
+  scriptPrompt?: string
+  service: string
+  models: Record<string, string>
+  templates: Record<string, string>
+  prompt: string
+  variants: Record<string, ModelDraft>
+  compare: string
+}
+export type OptimizationMode = 'polish' | 'enrich'
+export type PromptReferences = 'none' | 'reference' | 'first_frame' | 'last_frame' | 'first_last'
+export interface PromptOptimization { prompt: string; kind: MediaKind; mode: OptimizationMode; references: PromptReferences }
+export interface PromptResult { text: string; model: string }
+export interface OptimizedPrompt extends PromptResult { mode: OptimizationMode; references?: PromptReferences }
+export interface PromptSuggestion extends OptimizedPrompt { original: string }
+export interface ShotDraft { shot: ShotLink; kind: MediaKind; editor: Composer; updated: number }
+export interface Comparison { id: string; jobIds: [string, string]; selected: string | null }
 export type PerformanceMode = 'auto' | 'eco' | 'performance'
 export interface ExportSize { width: number; height: number; fit: 'crop' | 'contain' }
 export const defaultConfig = (t: Template): Record<string, Value> =>
@@ -470,6 +504,12 @@ export function jobStatusGroup(status: string): JobStatusGroup {
 }
 
 export interface Bridge {
+  optimizePrompt(input: PromptOptimization): Promise<PromptResult>
+  createScript(story: Screenplay): Promise<Script>
+  shotDrafts(): Promise<ShotDraft[]>
+  saveShotDraft(draft: ShotDraft, picks: Picked[]): Promise<void>
+  startComparison(inputs: [Start, Start]): Promise<Comparison>
+  selectComparison(id: string, jobId: string): Promise<void>
   exportSized(id: string, size: ExportSize, choose: boolean): Promise<{ path: string | null; engine: string; fallback: string }>
   thumbnail(id: string): Promise<string>
   savePerformance(mode: PerformanceMode): Promise<void>
@@ -500,6 +540,7 @@ export interface Bridge {
   frame(id: string): Promise<Picked>
   start(input: Start): Promise<string>
   resume(id: string): Promise<void>
+  copyTaskInfo(id: string): Promise<void>
   reuse(id: string): Promise<Reuse>
   open(id: string): Promise<void>
   folder(): Promise<void>

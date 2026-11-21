@@ -15,6 +15,7 @@ import {
 } from '../shared'
 import { Modal } from './Editor'
 import { ModelPicker, useModelCatalog } from './ModelPicker'
+import { ServiceError } from './UsageHelp'
 import {
   WorkflowSettings,
   ControlSettings,
@@ -334,11 +335,7 @@ export function ConnectionEditor({
               change={setControls}
             />
           )}
-          {err && (
-            <p role="alert" className="error">
-              {err}
-            </p>
-          )}
+          {err && <ServiceError message={err} />}
         </div>
         <footer className="modal-actions">
           <button type="button" onClick={close}>

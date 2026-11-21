@@ -31,6 +31,12 @@ import {
   type ProfileView,
   type Slot,
   type Value,
+  type Composer,
+  type ModelDraft,
+  type Start,
+  type Comparison,
+  type OptimizationMode,
+  type PromptOptimization,
 } from '../shared'
 import { Modal, Prompt } from './Editor'
 import { ImageExport, aspect } from './ImageExport'
@@ -45,6 +51,11 @@ import { BackgroundTasks, jobAction } from './BackgroundTasks'
 import { WorkLibrary, defaultLibraryView } from './WorkLibrary'
 import { ComfyControls } from './ComfyControls'
 import { useStudioState } from './useStudioState'
+import { useShotDrafts } from './useShotDrafts'
+import { adoptPrompt, generationCandidate, optimizationModes, PromptOptimizer, promptReferences, usePromptRequests } from './PromptOptimizer'
+import { comparisonOptions, peerInput, ComparisonDialog } from './ImageComparison'
+import { ServiceError, UsageHelp } from './UsageHelp'
+import { taskGuidance } from './taskHelp'
 const example = {
   image:
     '一条带有细密刻纹的钛金属带扭转成莫比乌斯环，悬在黑曜石台面上。左侧冰蓝、右侧紫罗兰色的轮廓光勾出曲面，低机位产品摄影。',
@@ -75,15 +86,6 @@ function Icon({ name }: { name: keyof typeof icons }) {
   )
 }
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
-interface Draft {
-  config: Record<string, Value>
-  priority: number
-  size: string
-  seconds: number
-  manualSize?: boolean
-  intent?: string
-  byMode: Record<string, Picked[]>
-}
 type Page = 'create' | 'script' | 'library' | 'settings'
 const pageNames = {
   create: '创作台',
@@ -98,17 +100,25 @@ function App() {
   const {state: data, refresh} = useStudioState(say)
   const jobs = data?.jobs ?? noJobs
   const [lastSubmitted, setLastSubmitted] = useState('')
-  const [kind, setKind] = useState<MediaKind>('image'),
-    [service, services] = useState({ image: '@site', video: '@site' }),
-    [selectedModels, setSelectedModels] = useState<Record<string, string>>({}),
-    [tpl, templateIds] = useState<Record<string, string>>({})
-  const [prompts, setPrompts] = useState({ image: '', video: '' }),
-    [drafts, setDrafts] = useState<Record<string, Draft>>({}),
-    [shown, show] = useState(''),
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [kind, setKind] = useState<MediaKind>('image')
+  const workspace = useShotDrafts(say)
+  const shot = workspace.bindings[kind]
+  const promptRequests = usePromptRequests()
+  const promptScope = [kind, shot?.scriptId, shot?.sceneId].join('/')
+  const [generationReview, setGenerationReview] = useState<{ scope: string; input: PromptOptimization; error: string } | null>(null)
+  const composer = workspace.get(kind, shot)
+  const [submitIssue, setSubmitIssue] = useState<{ scope: string; message: string }>()
+  const change = (edit: (old: Composer) => Composer) => {
+    setSubmitIssue(undefined)
+    workspace.change(kind, shot, edit)
+  }
+  const [shown, show] = useState(''),
     [chosen, choose] = useState('')
   const [editor, edit] = useState<{
       official: boolean
       profile?: ProfileView
+      jobKind?: MediaKind
     } | null>(null),
     [removing, remove] = useState<ProfileView | null>(null),
     [busy, markBusy] = useState(false)
@@ -124,7 +134,8 @@ function App() {
   const [integrations, setIntegrations] = useState<Integrations>()
   const [openedScripts, setOpenedScripts] = useState(false)
   const [libraryView, setLibraryView] = useState(defaultLibraryView)
-  const [shotBindings, setShotBindings] = useState<Partial<Record<MediaKind, ShotLink>>>({})
+  const [comparison, compare] = useState<Comparison | null>(null)
+  const [scriptRevision, refreshScripts] = useState(0)
   const loadSettings = useCallback(async () => {
     try { setIntegrations(await window.studio.settings()) }
     catch (e) { say(msg(e)); throw e }
@@ -135,15 +146,12 @@ function App() {
     pageTo('settings')
   }
   function shotPrompt(destination: MediaKind, value: string, shot: ShotLink) {
-    setShotBindings(prev => ({ ...prev, [destination]: shot }))
-    const key = service[destination] + destination
-    const t = siteTemplate(tpl[key] ?? '')
-    if (t && !t.Text) templateIds(old => ({ ...old, [key]: defaultTemplate(destination).Key }))
+    if (!workspace.ready) { say('正在读取分镜草稿，请稍后再打开。'); return }
+    workspace.open(destination, shot, value)
     setKind(destination)
-    setPrompts(old => ({ ...old, [destination]: value }))
     show('')
     pageTo('create')
-    say('已填入分镜提示词，确认参数后即可生成。')
+    say('已打开分镜草稿。')
   }
   const lock = useRef(false)
   const official = data?.official
@@ -151,16 +159,19 @@ function App() {
     (p) => !isSite(p.ProtocolId) || p.BaseUrl !== siteBase,
   )
   const profile = externals.find(
-    (p) => p.Id === service[kind] && mediaKind(p.ProtocolId) === kind,
+    (p) => p.Id === composer.service && mediaKind(p.ProtocolId) === kind,
   )
-  const modelFor = (p: ProfileView) =>
-    profileModels(p).includes(selectedModels[p.Id]) ? selectedModels[p.Id] : p.Model
+  const modelFor = (p: ProfileView, editor = composer) =>
+    profileModels(p).includes(editor.models[p.Id]) ? editor.models[p.Id] : p.Model
   const selectedModel = profile && modelFor(profile)
+  const staleService = !!data && composer.service !== '@site' && !profile
+  const staleModel = !!profile && !isSite(profile.ProtocolId) && !!composer.models[profile.Id]
+    && !profileModels(profile).includes(composer.models[profile.Id])
   const id = profile?.Id ?? '@site',
     proto = profile?.ProtocolId ?? (kind === 'image' ? 'rh-image' : 'rh-video'),
     native = isSite(proto)
   const currentTemplate =
-      siteTemplate(tpl[id + kind] ?? '') ?? defaultTemplate(kind),
+      siteTemplate(composer.templates[id] ?? '') ?? defaultTemplate(kind),
     preset = presets[proto],
     controls = profile?.Controls,
     sizes =
@@ -190,7 +201,7 @@ function App() {
     profile?.BaseUrl,
     native ? currentTemplate.Key : selectedModel,
   ])
-  const draft: Draft = drafts[dk] ?? {
+  const draft: ModelDraft = composer.variants[dk] ?? {
     config: native
       ? defaultConfig(currentTemplate)
       : {
@@ -203,12 +214,12 @@ function App() {
     seconds: seconds[0] ?? 0,
     byMode: {},
   }
-  const update = (patch: Partial<Draft>) =>
-    setDrafts((old) => ({ ...old, [dk]: { ...(old[dk] ?? draft), ...patch } }))
+  const update = (patch: Partial<ModelDraft>) =>
+    change(old => ({ ...old, variants: { ...old.variants, [dk]: { ...(old.variants[dk] ?? draft), ...patch } } }))
   function updateConfig(patch: Record<string, Value>) {
-    setDrafts(old => {
-      const current = old[dk] ?? draft
-      return { ...old, [dk]: { ...current, config: { ...current.config, ...patch } } }
+    change(old => {
+      const current = old.variants[dk] ?? draft
+      return { ...old, variants: { ...old.variants, [dk]: { ...current, config: { ...current.config, ...patch } } } }
     })
   }
   const mixedSite =
@@ -280,7 +291,7 @@ function App() {
             t.Video === (kind === 'video') && officialModes(t).includes(next),
         )!
     const key = JSON.stringify([id, kind, profile?.BaseUrl, t.Key])
-    const previous = drafts[key] ?? {
+    const previous = composer.variants[key] ?? {
       config: defaultConfig(t),
       priority: 0,
       size: sizes[0],
@@ -289,19 +300,34 @@ function App() {
     }
     const cfg = { ...previous.config }
     if ('mode' in cfg) cfg.mode = next
-    templateIds((v) => ({ ...v, [id + kind]: t.Key }))
-    setDrafts((v) => ({
-      ...v,
-      [key]: { ...previous, config: cfg, intent: next },
-    }))
+    change(old => ({ ...old, templates: { ...old.templates, [id]: t.Key },
+      variants: { ...old.variants, [key]: { ...previous, config: cfg, intent: next } } }))
     show('')
   }
-  const prompt = prompts[kind],
-    text = (s: string) => setPrompts((p) => ({ ...p, [kind]: s })),
+  const prompt = composer.prompt,
+    text = (s: string) => change(old => ({ ...old, prompt: s })),
     hasPrompt = !native || !!currentTemplate.Text
   const needsKey = native && !(profile ?? official)?.hasKey,
     job = shown ? jobs.find((j) => j.id === shown) : undefined,
     recent = lastSubmitted ? jobs.find((j) => j.id === lastSubmitted) : undefined
+  const checkProviderKey = profile && !native && !profile.hasKey && proto !== 'comfy-image'
+    && profile.Relay?.auth !== 'none' && profile.BaseUrl.startsWith('https://')
+  const recentIssue = recent && ['failed', 'uncertain', 'paused'].includes(recent.status) ? taskGuidance(recent, Date.now()) : undefined
+  const comparisons = data?.comparisons ?? []
+  const pictureOptions = kind === 'image' ? comparisonOptions(externals, official, id,
+    native ? currentTemplate.Key : selectedModel!, intent, assets) : []
+  const peer = pictureOptions.find(option => option.key === composer.compare)
+  const mediaAction = peer ? '用两个模型生成' : kind === 'video' ? '生成视频' : '生成图片'
+  const generationMode = hasPrompt ? composer.generationOptimization : undefined
+  const references = promptReferences(kind, intent, assets)
+  const review = generationReview?.scope === promptScope && page === 'create' && hasPrompt ? generationReview : null
+  function requestOptimization(input: PromptOptimization) {
+    void promptRequests.start(promptScope, input,
+      suggestion => workspace.change(kind, shot, old => ({ ...old, suggestion }), true))
+  }
+  function optimizeCurrent(mode: OptimizationMode) {
+    requestOptimization({ kind, prompt, mode, references })
+  }
   const attempt = async (fn: () => Promise<unknown>) => {
     try {
       await fn()
@@ -341,21 +367,36 @@ function App() {
       void off.then((f) => f())
     }
   }, [])
-  async function generate() {
+  async function generate(choice?: 'original' | 'suggestion') {
     if (lock.current || !data) return
+    if (choice && !review) return
+    setSubmitIssue(undefined)
+    const fail = (message: string) => {
+      if (choice) setGenerationReview(current => current && current.input === review?.input ? { ...current, error: message } : current)
+      else setSubmitIssue({ scope: promptScope, message })
+    }
+    if (choice && review && (review.input.prompt !== prompt || review.input.references !== references || review.input.mode !== generationMode)) {
+      fail('当前草稿或参考素材已改变，请返回创作台重新生成。')
+      return
+    }
+    const candidate = choice === 'suggestion' && review ? generationCandidate(workspace.get(kind, shot), review.input) : undefined
+    if (choice === 'suggestion' && !candidate?.text.trim()) { fail('请先完成当前草稿的提示词优化。'); return }
+    const generationPrompt = candidate?.text ?? prompt
+    if (staleService || staleModel) { fail('草稿原先的服务或模型已移除，请重新选择。'); return }
     if (needsKey) {
+      if (choice) { fail('请返回创作台配置生成服务的 Key。'); return }
       edit({ official: id === '@site', profile: profile ?? official })
       return
     }
-    if (hasPrompt && !prompt.trim()) {
-      say('请先写下希望生成的内容。')
+    if (hasPrompt && !generationPrompt.trim()) {
+      fail('请先写下希望生成的内容。')
       document.querySelector<HTMLTextAreaElement>('#prompt')?.focus()
       return
     }
     for (const slot of fileSlots) {
       const n = assets.filter((a) => a.kind === slot.Kind).length
       if (n < slot.Min || n > slot.Max) {
-        say(slot.Label + '需要 ' + slot.Min + '–' + slot.Max + ' 个素材。')
+        fail(slot.Label + '需要 ' + slot.Min + '–' + slot.Max + ' 个素材。')
         return
       }
     }
@@ -364,30 +405,44 @@ function App() {
       (!native || currentTemplate.AnyReference) &&
       !assets.length
     ) {
-      say('请添加参考素材。')
+      fail('请添加参考素材。')
+      return
+    }
+    if (kind === 'image' && composer.compare && !peer) { fail('第二个模型不适用当前输入，请重新选择。'); return }
+    if (generationMode && !choice) {
+      const input = { kind, prompt, mode: generationMode, references }
+      say('')
+      promptRequests.supersedeIfChanged(promptScope, input)
+      setGenerationReview({ scope: promptScope, input, error: '' })
+      if (!generationCandidate(composer, input) && integrations?.writer.hasKey) requestOptimization(input)
       return
     }
     lock.current = true
     markBusy(true)
     try {
-      const next = await window.studio.start({
-        shot: shotBindings[kind],
+      const input: Start = {
+        shot,
         profileId: id,
         model: native ? undefined : selectedModel,
         kind,
         template: currentTemplate.Key,
-        prompt: hasPrompt ? prompt : '',
+        prompt: hasPrompt ? generationPrompt : '',
         size: draft.size,
         seconds: draft.seconds,
         config: draft.config,
         priority: draft.priority,
         assets: paired ? frameOrder(assets) : assets,
-      })
+      }
+      const group = peer ? await window.studio.startComparison([input, peerInput(input, peer, intent)]) : undefined
+      const next = group ? group.jobIds[0] : await window.studio.start(input)
+      if (candidate) change(old => adoptPrompt(old, candidate))
+      if (choice) setGenerationReview(null)
+      if (group) compare(group)
       setLastSubmitted(next)
-      say('已加入后台，可以继续创作。')
-      void refresh([next]).catch(e => say('任务已保存，读取进度时出错。' + msg(e)))
+      say(group ? '两份候选已加入后台。' : '已加入后台，可以继续创作。')
+      void refresh(group ? undefined : [next]).catch(e => say('任务已保存，读取进度时出错。' + msg(e)))
     } catch (e) {
-      say(msg(e))
+      fail(msg(e))
     } finally {
       lock.current = false
       markBusy(false)
@@ -416,20 +471,39 @@ function App() {
     if (!keepDraft) setKind(j.kind)
     pageTo('create')
   }
+  function jobConnection(j: JobView) {
+    if (isSite(j.protocol) && j.base === siteBase) return official
+    return externals.find(p => p.Id === j.profileId && p.BaseUrl === j.base && p.ProtocolId === j.protocol)
+  }
+  function needsNewModel(j: JobView) {
+    const p = jobConnection(j)
+    return !p || (!isSite(j.protocol) && !profileModels(p).includes(j.model))
+  }
+  function editJobConnection(j: JobView) {
+    const original = jobConnection(j)
+    if (original) edit({ official: isSite(j.protocol) && j.base === siteBase, profile: original, jobKind: j.kind })
+    else {
+      settingsPage('media')
+      say('原任务使用的连接已移除或改过地址，请核对「' + j.profileName + '」的配置。')
+    }
+  }
   async function reuse(j: JobView) {
-    const record = await window.studio.reuse(j.id)
     const sourceShot = j.shot ?? undefined
     const primary = isSite(j.protocol) && j.base === siteBase
-    const p = primary
-      ? undefined
-      : externals.find(
-          (p) =>
-            p.Id === j.profileId &&
-            p.BaseUrl === j.base &&
-            p.ProtocolId === j.protocol,
-        )
-    if (!primary && !p)
-      throw Error('原模型服务已移除或地址已修改，请先恢复连接。')
+    const p = primary ? undefined : jobConnection(j)
+    if (j.status === 'failed' && needsNewModel(j)) {
+      setKind(j.kind)
+      workspace.select(j.kind, sourceShot)
+      workspace.change(j.kind, sourceShot, old => ({
+        ...old, prompt: j.prompt, service: p?.Id ?? old.service, models: p ? { ...old.models, [p.Id]: p.Model } : old.models,
+        suggestion: undefined, appliedOptimization: undefined, promptBeforeOptimization: undefined, compare: '',
+      }))
+      show(''); pageTo('create')
+      say('原模型配置已变更，已取回提示词。请重新确认生成服务、素材和参数。')
+      return
+    }
+    if (!primary && !p) throw Error('原模型服务已移除或地址已修改，请先恢复连接。')
+    const record = await window.studio.reuse(j.id)
     const next = p?.Id ?? '@site',
       t = isSite(j.protocol) ? siteTemplate(j.model) : undefined,
       key = JSON.stringify([next, j.kind, p?.BaseUrl, j.model])
@@ -457,14 +531,12 @@ function App() {
       if ('duration' in conf) conf.duration = j.seconds
     }
     setKind(j.kind)
-    services((o) => ({ ...o, [j.kind]: next }))
-    setShotBindings(o => ({ ...o, [j.kind]: sourceShot }))
-    if (t) templateIds((o) => ({ ...o, [next + j.kind]: t.Key }))
-    else if (p) setSelectedModels((o) => ({ ...o, [p.Id]: j.model }))
-    setPrompts((o) => ({ ...o, [j.kind]: j.prompt }))
-    setDrafts((o) => ({
-      ...o,
-      [key]: {
+    workspace.select(j.kind, sourceShot)
+    workspace.change(j.kind, sourceShot, old => ({
+      ...old, service: next, prompt: j.prompt, compare: '', suggestion: undefined, appliedOptimization: undefined, promptBeforeOptimization: undefined,
+      templates: t ? { ...old.templates, [next]: t.Key } : old.templates,
+      models: p && !t ? { ...old.models, [p.Id]: j.model } : old.models,
+      variants: { ...old.variants, [key]: {
         config: conf,
         intent: restoredIntent,
         priority: j.site?.priority ?? 0,
@@ -473,16 +545,18 @@ function App() {
         byMode: {
           [String(conf.mode ?? restoredIntent ?? 'default')]: record.assets,
         },
-      },
+      } },
     }))
     show('')
     pageTo('create')
     say('已恢复提示词、所选参数和素材顺序。')
   }
-  async function continueWithImage(j: JobView, destination: MediaKind) {
+  async function continueWithImage(j: JobView, destination: MediaKind, motion?: string) {
     const wanted = destination === 'image' ? 'i2i' : 'first_frame'
     const candidates = externals.filter(p => mediaKind(p.ProtocolId) === destination)
-    let p = candidates.find(p => p.Id === service[destination])
+    const sourceShot = j.shot ?? undefined
+    const target = workspace.get(destination, sourceShot)
+    let p = candidates.find(p => p.Id === target.service)
     function imageMode(connection?: ProfileView) {
       if (!connection || isSite(connection.ProtocolId)) return wanted
       const choices = [...(presets[connection.ProtocolId].modes ?? []), ...Object.keys(connection.Relay?.workflows ?? {})]
@@ -499,7 +573,7 @@ function App() {
       throw Error(
         '当前生成服务未配置带图方式，请在创作台为该媒体类型选择支持参考图的连接。',
       )
-    const prev = siteTemplate(tpl[next + destination] ?? '')
+    const prev = siteTemplate(target.templates[next] ?? '')
     const t = site
       ? prev && officialModes(prev).includes(wanted)
         ? prev
@@ -512,9 +586,9 @@ function App() {
       p?.Id ?? '@site',
       destination,
       p?.BaseUrl,
-      t?.Key ?? (p && modelFor(p)),
+      t?.Key ?? (p && modelFor(p, target)),
     ])
-    const old = drafts[key],
+    const old = target.variants[key],
       cfg = t
         ? { ...defaultConfig(t), ...old?.config }
         : { resolution: p?.Controls?.resolutions?.[0] ?? (p && presets[p.ProtocolId].resolutions?.[0]) ?? '',
@@ -529,13 +603,11 @@ function App() {
         p?.Controls?.sizes?.[0] ??
         (p ? presets[p.ProtocolId].sizes[0] : '')
     setKind(destination)
-    services(o => ({ ...o, [destination]: next }))
-    setShotBindings(o => ({ ...o, [destination]: j.shot ?? undefined }))
-    if (t)
-      templateIds((o) => ({ ...o, [(p?.Id ?? '@site') + destination]: t.Key }))
-    setDrafts((o) => ({
-      ...o,
-      [key]: {
+    workspace.select(destination, sourceShot)
+    workspace.change(destination, sourceShot, current => ({
+      ...current, service: next, prompt: motion ?? current.prompt, compare: '',
+      templates: t ? { ...current.templates, [next]: t.Key } : current.templates,
+      variants: { ...current.variants, [key]: {
         ...old,
         config: cfg,
         priority: old?.priority ?? 0,
@@ -548,7 +620,7 @@ function App() {
           0,
         byMode: { ...old?.byMode, [label]: actual === 'first_last'
           ? [{ ...a, role: 'first_frame' }, ...frameOrder(old?.byMode[label] ?? []).filter(v => v.role === 'last_frame')] : [a] },
-      },
+      } },
     }))
     show('')
     pageTo('create')
@@ -562,12 +634,12 @@ function App() {
   async function saved(savedId: string) {
     const isOfficial = editor?.official
     const s = await refresh()
-    if (!isOfficial) {
+    if (!isOfficial && !editor?.jobKind) {
       const p = s.profiles.find((x) => x.Id === savedId)
       if (p) {
         const k = mediaKind(p.ProtocolId)
         setKind(k)
-        services((o) => ({ ...o, [k]: p.Id }))
+        workspace.change(k, workspace.bindings[k], old => ({ ...old, service: p.Id, compare: '' }))
       }
     }
     edit(null)
@@ -587,6 +659,7 @@ function App() {
       ? (job.mediaUrl ?? convertFileSrc(job.mediaPath))
       : ''
   const previewKey = job ? job.id + ':' + previewUrl : ''
+  const jobComparison = job && comparisons.find(group => group.jobIds.includes(job.id))
   return (
     <div className="shell" data-performance={integrations?.performance ?? 'auto'}>
       <aside className="rail">
@@ -620,6 +693,7 @@ function App() {
         <header className="top">
           <h1>{pageNames[page]}</h1>
           <div className="top-tools">
+            <button className="help-launcher" aria-label="使用帮助" title="使用帮助" onClick={() => setHelpOpen(true)}>?</button>
             <BackgroundTasks jobs={jobs} inspect={j => inspect(j, true)} />
             {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
               {(['image', 'video'] as const).map(k =>
@@ -630,7 +704,9 @@ function App() {
         </header>
         {openedScripts && <ScriptDesk active={page === 'script'} writer={integrations?.writer}
           configure={() => settingsPage('writer')} usePrompt={shotPrompt} jobs={data?.jobs ?? []} inspect={inspect}
-          useFrame={async (image, motion) => { await continueWithImage(image, 'video'); setPrompts(o => ({ ...o, video: motion })) }} />}
+          useFrame={(image, motion) => continueWithImage(image, 'video', motion)}
+          revision={scriptRevision} comparisons={comparisons} compare={compare}
+          beforeEdit={workspace.flush} edited={workspace.syncScript} />}
         {page === 'create' ? (
           <div className="work">
             <section className="canvas-col">
@@ -671,7 +747,8 @@ function App() {
                       />
                     )
                   ) : (
-                    <JobPreviewState job={job} retry={previewUrl && unreadable === previewKey ? () => setUnreadable('') : undefined} />
+                    <JobPreviewState key={job.id} job={job} promptOnly={needsNewModel(job)} configure={() => editJobConnection(job)} reuse={() => reuse(job)}
+                      retry={previewUrl && unreadable === previewKey ? () => setUnreadable('') : undefined} />
                   )
                 ) : (
                   <>
@@ -770,9 +847,8 @@ function App() {
                         打开原文件
                       </button>
                     )}
-                    <button onClick={() => void attempt(() => reuse(job))}>
-                      复用参数
-                    </button>
+                    {job.status !== 'failed' && <button onClick={() => void attempt(() => reuse(job))}>复用参数</button>}
+                    {jobComparison && <button onClick={() => compare(jobComparison)}>查看双模型对比</button>}
                     {job.file && job.kind === 'image' && (
                       <>
                         <button
@@ -791,15 +867,6 @@ function App() {
                         </button>
                       </>
                     )}
-                    {job.status === 'paused' && (
-                      <button
-                        onClick={() =>
-                          void attempt(() => window.studio.resume(job.id))
-                        }
-                      >
-                        恢复任务
-                      </button>
-                    )}
                   </div>
                 )}
               </div>
@@ -811,13 +878,15 @@ function App() {
                 <div className="service-row">
                   <select
                     aria-label="生成服务"
-                    value={id}
+                    value={staleService ? composer.service : id}
                     onChange={(e) => {
-                      services((o) => ({ ...o, [kind]: e.target.value }))
+                      const value = e.target.value
+                      change(old => ({ ...old, service: value, compare: '' }))
                       show('')
                     }}
                   >
                     <option value="@site">AIGC 创作空间 · 官网</option>
+                    {staleService && <option value={composer.service} disabled>原服务已移除，请重新选择</option>}
                     {externals
                       .filter((p) => mediaKind(p.ProtocolId) === kind)
                       .map((p) => (
@@ -834,6 +903,14 @@ function App() {
                     <Icon name="settings" />
                   </button>
                 </div>
+                {data && (staleService || staleModel || needsKey || checkProviderKey) && <div className="connection-note">
+                  {staleService ? '草稿使用的服务已移除。请在上方选一个可用连接，再确认它支持的素材和参数。'
+                    : staleModel ? '草稿原先的模型已移除。请重新选择生成模型，或在连接中加回原模型 ID。'
+                    : needsKey ? '当前生成服务还没有配置 Key。使用官网可连接 OpenAPI Key，也可以选择自己的模型服务。'
+                    : '这个连接还没有保存 API Key。如果服务商要求鉴权，请填写它签发的 Key。免鉴权的服务可直接生成。'}
+                  {checkProviderKey && !staleModel ? <button className="link" onClick={() => edit({ official: false, profile })}>编辑当前连接</button>
+                    : <button className="link" onClick={() => settingsPage('media')}>设置图片与视频</button>}
+                </div>}
                 <label>
                   创作方式
                   <select
@@ -854,10 +931,8 @@ function App() {
                     <select
                       value={currentTemplate.Key}
                       onChange={(e) => {
-                        templateIds((o) => ({
-                          ...o,
-                          [id + kind]: e.target.value,
-                        }))
+                        const value = e.target.value
+                        change(old => ({ ...old, compare: '', templates: { ...old.templates, [id]: value } }))
                         show('')
                       }}
                     >
@@ -870,14 +945,15 @@ function App() {
                         ))}
                     </select>
                   </label>
-                ) : profile && profileModels(profile).length > 1 ? (
+                ) : profile && (profileModels(profile).length > 1 || staleModel) ? (
                   <label>
                     生成模型
-                    <select aria-label="生成模型" value={selectedModel} onChange={(e) => {
+                    <select aria-label="生成模型" value={staleModel ? composer.models[profile.Id] : selectedModel} onChange={(e) => {
                       const value = e.target.value
-                      setSelectedModels((old) => ({ ...old, [id]: value }))
+                      change(old => ({ ...old, compare: '', models: { ...old.models, [id]: value } }))
                       show('')
                     }}>
+                      {staleModel && <option disabled value={composer.models[profile.Id]}>原模型已移除，请重新选择</option>}
                       {profileModels(profile).map((model) => (
                         <option key={model}>{model}</option>
                       ))}
@@ -888,12 +964,32 @@ function App() {
                     {selectedModel} · {preset.title}
                   </small>
                 )}
-                {shotBindings[kind] && <div className="bound-shot"><span>{shotBindings[kind]!.label}</span>
-                  <button className="link" onClick={() => setShotBindings(o => ({ ...o, [kind]: undefined }))}>解除关联</button></div>}
+                {shot ? <div className="bound-shot"><span>{shot.label}</span>
+                  <small role="status">{workspace.status}</small>
+                  {composer.scriptPrompt && composer.scriptPrompt !== prompt &&
+                    <button className="link" onClick={() => text(composer.scriptPrompt!)}>使用剧本提示词</button>}
+                  {workspace.status === '草稿保存失败' && <button className="link" onClick={() => void attempt(workspace.flush)}>重试保存</button>}
+                  <button className="link" onClick={() => {
+                    workspace.change(kind, undefined, () => ({ ...composer, suggestion: undefined, appliedOptimization: undefined, promptBeforeOptimization: undefined }))
+                    workspace.select(kind)
+                  }}>解除关联</button></div>
+                  : workspace.latest && <button className="link resume-shot" onClick={() => {
+                    const item = workspace.latest!
+                    workspace.select(item.kind, item.shot)
+                    setKind(item.kind); show(''); pageTo('create')
+                  }}>继续上次分镜 · {workspace.latest.shot.label}</button>}
                 {hasPrompt && (
                   <Prompt
                     value={prompt}
                     change={text}
+                    tools={<PromptOptimizer key={promptScope} kind={kind} shotLabel={shot?.label} composer={composer}
+                      writer={integrations?.writer} activity={promptRequests.entries.get(promptScope)} change={change}
+                      configure={() => settingsPage('writer')} start={optimizeCurrent}
+                      generation={review ? {
+                        input: review.input, models: [native ? currentTemplate.Name : selectedModel, peer?.name].filter(Boolean).join(' / '),
+                        action: mediaAction, submitting: busy, error: review.error,
+                        submit: choice => void generate(choice), close: () => setGenerationReview(null),
+                      } : undefined} />}
                     hint={
                       (native && currentTemplate.Text?.Hint) ||
                       (kind === 'video'
@@ -1101,7 +1197,7 @@ function App() {
                     ))}
                 {fileSlots.map((slot) => (
                   <Assets
-                    key={dk + mode + slot.Kind}
+                    key={[shot?.scriptId, shot?.sceneId, dk, mode, slot.Kind].join('/')}
                     slot={slot}
                     items={assets}
                     paired={paired}
@@ -1115,6 +1211,15 @@ function App() {
                 ))}
                 {proto === 'comfy-image' && <ComfyControls config={draft.config} imageInput={mode === 'i2i'}
                   change={updateConfig} />}
+                {kind === 'image' && <label>对比模型
+                  <select aria-label="对比模型" value={composer.compare} onChange={e => {
+                    const value = e.target.value
+                    change(old => ({ ...old, compare: value }))
+                  }}>
+                    <option value="">仅用当前模型</option>
+                    {composer.compare && !peer && <option value={composer.compare} disabled>请重选兼容模型</option>}
+                    {pictureOptions.map(o => <option key={o.key} value={o.key}>{o.name}</option>)}
+                  </select></label>}
                 {native && currentTemplate.Hint && (
                   <p className="help">{currentTemplate.Hint}</p>
                 )}
@@ -1136,30 +1241,41 @@ function App() {
                 {recent && <div className="latest-task" role="group" aria-label="最近提交的任务">
                   <div aria-live="polite" aria-atomic="true">
                     <small>最近提交 · {statusLabels[recent.status] || recent.status}</small>
-                    <span title={recent.prompt}>{recent.prompt || siteTemplate(recent.model)?.Name || recent.model}</span>
+                    <span title={recent.prompt}>{recentIssue?.title || recent.prompt || siteTemplate(recent.model)?.Name || recent.model}</span>
                   </div>
                   <button className="link" onClick={() => inspect(recent, true)}>{jobAction(recent)}</button>
                 </div>}
                 <small>
+                  {kind === 'image' && composer.compare && '2 个生成任务 · 当前模型 '}
                   {native
                     ? quote(currentTemplate, draft.config, draft.priority)
                     : proto === 'comfy-image' ? '由所连 ComfyUI 运行'
                     : '由所选服务商结算'}
+                  {peer && ' · 对比模型 ' + peer.price}
                 </small>
+                {submitIssue?.scope === promptScope && <ServiceError message={submitIssue.message}
+                  configure={() => edit({ official: id === '@site', profile: profile ?? official })} />}
+                {hasPrompt && <label className="generation-prompt-mode">生成前优化
+                  <select aria-label="生成前优化" value={generationMode ?? ''} onChange={e => {
+                    const value = e.target.value
+                    change(old => ({ ...old, generationOptimization: value === 'polish' || value === 'enrich' ? value : undefined }))
+                  }}>
+                    <option value="">直接生成</option>
+                    <option value="polish">{optimizationModes.polish}</option>
+                    <option value="enrich">{optimizationModes.enrich}</option>
+                  </select>
+                </label>}
                 <button
                   className="primary generate"
-                  disabled={busy || !data}
+                  disabled={busy || !data || staleService || staleModel || (kind === 'image' && !!composer.compare && !peer)}
                   onClick={e => { if (e.detail <= 1) void generate() }}
                 >
                   {busy
                     ? '正在添加任务…'
                     : needsKey
                       ? '连接官网 Key'
-                      : native && !hasPrompt
-                        ? '处理视频'
-                        : kind === 'video'
-                          ? '生成视频'
-                          : '生成图片'}
+                      : !hasPrompt ? '处理视频'
+                      : generationMode ? '优化后' + mediaAction : mediaAction}
                 </button>
               </div>
             </aside>
@@ -1195,10 +1311,17 @@ function App() {
           saved={(path, engine, reason) => say(`${engine} 已导出到 ${path}${reason ? '（GPU 回退原因 ' + reason + '）' : ''}`)}
         />
       )}
+      {helpOpen && <UsageHelp close={() => setHelpOpen(false)} settings={target => { setHelpOpen(false); settingsPage(target) }} />}
+      {comparison && <ComparisonDialog group={comparisons.find(g => g.id === comparison.id) ?? comparison}
+        inspect={j => { compare(null); inspect(j, true) }}
+        jobs={jobs} close={() => compare(null)} selected={() => {
+          refreshScripts(n => n + 1)
+          void refresh().catch(e => say(msg(e)))
+        }} />}
       {editor && (
         <ConnectionEditor
           {...editor}
-          kind={kind}
+          kind={editor.jobKind ?? kind}
           storage={data?.keyStorage ?? ''}
           close={() => edit(null)}
           saved={saved}

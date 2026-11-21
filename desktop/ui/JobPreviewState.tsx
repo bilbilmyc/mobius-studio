@@ -1,5 +1,6 @@
-import { useLayoutEffect, useState } from 'react'
+import { useState } from 'react'
 import { statusLabels, type JobView } from '../shared'
+import { canResume, interruptedDownload, taskGuidance, useVisibleTime } from './taskHelp'
 
 const stages = ['提交任务', '模型生成', '保存原文件']
 
@@ -14,23 +15,7 @@ function duration(seconds: number) {
   )
 }
 
-function WaitTime({ created, retryAt }: Pick<JobView, 'created' | 'retryAt'>) {
-  const [now, setNow] = useState(Date.now)
-  useLayoutEffect(() => {
-    let timer: number | undefined
-    function sync() {
-      window.clearInterval(timer)
-      if (document.hidden) return
-      setNow(Date.now())
-      timer = window.setInterval(() => setNow(Date.now()), 1000)
-    }
-    sync()
-    document.addEventListener('visibilitychange', sync)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', sync)
-    }
-  }, [created, retryAt])
+function WaitTime({ created, retryAt, now }: Pick<JobView, 'created' | 'retryAt'> & { now: number }) {
   const elapsed = created > 0 ? duration(Math.max(0, Math.floor((now - created) / 1000))) : ''
   const retry = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0
   return (
@@ -55,7 +40,10 @@ function WaitTime({ created, retryAt }: Pick<JobView, 'created' | 'retryAt'>) {
   )
 }
 
-export function JobPreviewState({ job, retry }: { job: JobView; retry?: () => void }) {
+export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
+  job: JobView; retry?: () => void; configure: () => void; reuse: () => Promise<void>; promptOnly: boolean
+}) {
+  const [busy, setBusy] = useState(false), [feedback, setFeedback] = useState('')
   const media = job.kind === 'image' ? '图片' : '视频'
   const state = retry ? 'unreadable' : job.status
   const phase = ['preparing', 'submitting'].includes(state)
@@ -65,6 +53,15 @@ export function JobPreviewState({ job, retry }: { job: JobView; retry?: () => vo
       : state === 'downloading'
         ? 2
         : -1
+  const now = useVisibleTime(phase >= 0, 1000)
+  const guide = !retry && taskGuidance(job, now)
+  async function perform(action: () => Promise<void>, success = '', fallback = '') {
+    if (busy) return
+    setFeedback(''); setBusy(true)
+    try { await action(); setFeedback(success) }
+    catch (e) { setFeedback(fallback || String(e)) }
+    finally { setBusy(false) }
+  }
   const titles: Record<string, string> = {
     preparing: '正在准备素材',
     submitting: '正在提交' + media + '任务',
@@ -120,7 +117,7 @@ export function JobPreviewState({ job, retry }: { job: JobView; retry?: () => vo
         </div>
         <div role="status" aria-live="polite" aria-atomic="true">
           <h2>{titles[state] ?? statusLabels[state] ?? '等待任务状态'}</h2>
-          <p>{detail}</p>
+          <p>{guide ? guide.title : detail}</p>
         </div>
         {phase >= 0 && (
           <ol className="preview-stages" aria-label="任务阶段">
@@ -137,8 +134,27 @@ export function JobPreviewState({ job, retry }: { job: JobView; retry?: () => vo
           </ol>
         )}
         {phase >= 0 && (job.created > 0 || !!job.retryAt) && (
-          <WaitTime created={job.created} retryAt={job.retryAt} />
+          <WaitTime created={job.created} retryAt={job.retryAt} now={now} />
         )}
+        {guide && <div className="task-guidance" role="group" aria-label="处理建议">
+          <p className="guide-target">{[media, job.profileName, job.model].filter(Boolean).join(' · ')}</p>
+          <p>{guide.advice}</p>
+          {job.remoteId && <p className="task-ticket">服务商任务号 <code>{job.remoteId}</code></p>}
+          {phase >= 0 && !!job.progressAt && <p>上次状态变化 {new Date(job.progressAt).toLocaleString()}</p>}
+          <div className="guidance-actions">
+            {guide.connection && <button onClick={configure}>检查生成服务</button>}
+            {canResume(job) && <button className="primary" disabled={busy} onClick={() => void perform(() => window.studio.resume(job.id))}>
+              {interruptedDownload(job) ? '重新下载结果' : '继续查询原任务'}</button>}
+            {job.status === 'failed' && <button disabled={busy} onClick={() => void perform(reuse)}>{promptOnly ? '仅复用提示词' : '复用参数'}</button>}
+            <button disabled={busy} onClick={() => void perform(() => window.studio.copyTaskInfo(job.id), '排查信息已复制。', '未能复制，请展开技术详情，手动选取任务号和提交时间。')}>复制排查信息</button>
+          </div>
+          {feedback && <p role="status">{feedback}</p>}
+          <details><summary>技术详情</summary>
+            <p>{job.detail || '服务商未返回具体原因。'}</p>
+            {job.created > 0 && <p>提交时间 {new Date(job.created).toLocaleString()}</p>}
+            <p>本地记录号 <code>{job.id}</code></p>
+          </details>
+        </div>}
         {retry && <button onClick={retry}>重新加载预览</button>}
       </div>
     </div>

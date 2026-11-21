@@ -85,7 +85,7 @@ function WriterForm({ data, reload }: { data: Integrations['writer']; reload: Pr
     setBase(apiBase.trim().replace(/\/+$/, ''))
     setKey('')
   })}>
-    <p>DeepSeek V4 可将故事构想写成分镜。也可填写支持 JSON 输出的 Chat Completions 兼容服务。</p>
+    <p>剧本和提示词优化共用这条文本模型连接。支持 Chat Completions 兼容服务，生成剧本还需要模型支持 JSON 输出。</p>
     <label>剧本服务地址<input type="url" required disabled={busy} value={base} onChange={e => { setBase(e.target.value); setKey('') }} /></label>
     <label>剧本 API Key<input type="password" autoComplete="new-password" disabled={busy} value={key} onChange={e => setKey(e.target.value)}
       placeholder={data.hasKey && base.trim().replace(/\/+$/, '') === data.base ? '已保存，留空沿用' : '输入这个服务的 API Key'} /></label>

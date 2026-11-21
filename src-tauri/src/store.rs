@@ -278,7 +278,7 @@ impl Store {
             None => Ok(String::new()),
         }
     }
-    fn job_path(&self, id: &str) -> Result<PathBuf> {
+    pub(crate) fn job_path(&self, id: &str) -> Result<PathBuf> {
         if !valid_id(id) {
             return Err("任务编号无效。".into());
         }
@@ -387,5 +387,8 @@ impl Store {
                     .ok_or("请重新选择参考素材。".into())
             })
             .collect()
+    }
+    pub(crate) fn remember_picks(&self, assets: &HashMap<String, Asset>) {
+        self.picks.lock().unwrap().extend(assets.clone());
     }
 }

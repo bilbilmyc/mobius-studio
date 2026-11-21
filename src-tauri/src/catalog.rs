@@ -110,7 +110,7 @@ async fn fetch_models(
         .timeout(Duration::from_secs(25))
         .send()
         .await
-        .map_err(|e| Fault::uncertain(e.without_url()))?;
+        .map_err(Fault::transport)?;
     if probing
         && matches!(
             reply.status(),

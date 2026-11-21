@@ -259,6 +259,10 @@ pub struct Job {
     pub relay: Option<Relay>,
     pub status: String,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped_during: Option<String>,
     pub remote_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_at: Option<i64>,
@@ -285,7 +289,7 @@ impl Job {
             .unwrap_or(0)
     }
     pub fn view(&self, file: Option<&str>) -> Value {
-        json!({"id":self.id,"shot":self.shot,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"retryAt":self.retry_at,"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
+        json!({"id":self.id,"shot":self.shot,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"retryAt":self.retry_at,"progressAt":self.progress_at,"stoppedDuring":self.stopped_during,"hasResultUrl":self.result_url.is_some(),"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
     }
 }
 #[derive(Clone, Deserialize)]

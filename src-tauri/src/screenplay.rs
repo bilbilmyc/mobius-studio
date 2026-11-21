@@ -1,11 +1,9 @@
 use crate::{
     jobs::Studio,
-    model::{id, route, valid_id, Result},
-    provider::json_response,
+    model::{id, valid_id, Result},
     store::{read, save, Store},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
@@ -56,9 +54,9 @@ impl Screenplay {
     fn validate(&self) -> Result<()> {
         if self.title.trim().is_empty()
             || self.title.chars().count() > 200
-            || !(1..=12).contains(&self.scenes.len())
+            || self.scenes.is_empty()
         {
-            return Err("剧本需要标题和 1 到 12 个分镜。".into());
+            return Err("剧本需要标题和至少一个分镜。".into());
         }
         for scene in &self.scenes {
             for text in [
@@ -83,6 +81,21 @@ impl Screenplay {
 }
 
 impl Store {
+    pub fn create_script(&self, mut story: Screenplay) -> Result<Script> {
+        for scene in &mut story.scenes {
+            scene.id = id();
+        }
+        let script = Script {
+            id: id(),
+            created: chrono::Utc::now().timestamp_millis(),
+            model: "手工分镜".into(),
+            brief: String::new(),
+            finals: Default::default(),
+            story,
+        };
+        self.save_script(&script)?;
+        Ok(script)
+    }
     fn script(&self, script_id: &str) -> Result<Script> {
         if !valid_id(script_id) {
             return Err("剧本编号无效。".into());
@@ -100,15 +113,20 @@ impl Store {
     }
 
     pub fn resolve_shot(&self, mut link: ShotLink) -> Result<ShotLink> {
-        let script = self.script(&link.script_id)?;
-        let index = script
-            .story
-            .scenes
-            .iter()
-            .position(|s| s.id == link.scene_id)
+        link.label = self
+            .shot_labels(&link.script_id)?
+            .remove(&link.scene_id)
             .ok_or("所选分镜已移除。")?;
-        link.label = format!("{} · 第 {} 镜", script.story.title, index + 1);
         Ok(link)
+    }
+    pub fn shot_labels(&self, id: &str) -> Result<BTreeMap<String, String>> {
+        let story = self.script(id)?.story;
+        Ok(story
+            .scenes
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| (s.id, format!("{} · 第 {} 镜", story.title, i + 1)))
+            .collect())
     }
 
     pub fn set_final(
@@ -213,27 +231,14 @@ impl Studio {
         if brief.is_empty() || brief.chars().count() > 12000 || !(1..=12).contains(&count) {
             return Err("请填写 1 至 12000 字的故事构想，并选择 1 至 12 个分镜。".into());
         }
-        let writer = self.store.preferences()?.writer;
-        let key = self.store.vault.get(&writer, &writer.base_url)?;
-        if key.is_empty() {
-            return Err("请在设置的「剧本模型」中填写 API Key。".into());
-        }
         let system = concat!(
             "你是影视编剧。根据用户构想写中文分镜剧本。返回单个 JSON 对象，结构为 ",
             r#"{"title":"片名","scenes":[{"heading":"内景或外景、地点、时间","action":"画面与动作","dialogue":"台词或旁白，无则空字符串","imagePrompt":"独立可用的画面提示词","videoPrompt":"独立可用的运镜和动作提示词"}]}。"#,
             "各镜头的人物、服装和美术设定应保持连贯。"
         );
-        let request = self
-            .http
-            .post(route(&writer.base_url, "chat/completions")?)
-            .bearer_auth(&key)
-            .json(
-                &json!({"model":writer.model, "response_format":{"type":"json_object"},
-                "messages":[{"role":"system","content":system},
-                {"role":"user","content":format!("请写 {count} 个分镜。\n\n{brief}")}],
-                "stream":false}),
-            );
-        let reply = json_response(request, &key).await.map_err(|e| e.message)?;
+        let (model, reply) = self
+            .writer_completion(system, &format!("请写 {count} 个分镜。\n\n{brief}"), true)
+            .await?;
         let choice = &reply["choices"][0];
         if choice["finish_reason"] == "length" {
             return Err("生成内容被截断，请减少分镜数后重试。".into());
@@ -256,7 +261,7 @@ impl Studio {
             finals: Default::default(),
             id: id(),
             created: chrono::Utc::now().timestamp_millis(),
-            model: writer.model,
+            model,
             brief: brief.into(),
             story,
         };

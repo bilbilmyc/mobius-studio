@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ModelCatalog, ModelLookup } from '../shared'
+import { ServiceError } from './UsageHelp'
 
 export function useModelCatalog(query: ModelLookup) {
   const [result, setResult] = useState<ModelCatalog>()
@@ -76,11 +77,14 @@ export function ModelPicker({ label, value, change, catalog, canFetch, disabled,
       {!!suggestions?.length && <datalist id={field + '-hints'}>{suggestions.map(id => <option key={id} value={id} />)}</datalist>}
     </>}
     <div className="model-picker-feedback">
-      <span role="status" className={catalog.error ? 'error' : 'help'}>
-        {catalog.error || (catalog.models && (models.length ? `已获取 ${models.length} 个模型` : '服务返回了空列表，可手动填写模型 ID。'))}
-      </span>
+      {catalog.error ? <ServiceError message={catalog.error} context="catalog" /> :
+        <span role="status" className="help">
+          {catalog.models && (models.length ? `已获取 ${models.length} 个模型` : '服务返回了空列表，可手动填写模型 ID。')}
+        </span>}
       {models.length > 0 && <button type="button" className="link" disabled={disabled} onClick={() => setManual(!manual)}>
         {choosing ? '手动填写' : '从列表选择'}</button>}
     </div>
+    {models.length > 0 && value.trim() && !models.includes(value) &&
+      <p className="help">当前模型 ID 不在返回的列表里。可以从列表选择，或向服务商核对手动填写的 ID 和访问权限。</p>}
   </div>
 }

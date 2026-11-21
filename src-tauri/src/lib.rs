@@ -1,5 +1,6 @@
 mod catalog;
 mod comfy;
+mod comparisons;
 mod creation;
 mod export;
 mod inputs;
@@ -13,6 +14,7 @@ mod preferences;
 mod preview;
 mod provider;
 mod screenplay;
+mod shot_drafts;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -20,6 +22,7 @@ mod thumbnails;
 mod vault;
 #[cfg(test)]
 mod workspace_tests;
+mod writer;
 use jobs::Studio;
 use model::*;
 use serde_json::{json, Value};
@@ -30,12 +33,23 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 type Core<'a> = State<'a, Arc<Studio>>;
 
-fn view(app: &AppHandle, s: &Studio, j: &Job) -> Value {
+type ShotLabels = std::collections::HashMap<String, std::collections::BTreeMap<String, String>>;
+fn view(app: &AppHandle, s: &Studio, j: &Job, labels: &mut ShotLabels) -> Value {
     let file = s.store.original(j).ok();
     if let Some(p) = &file {
         let _ = app.asset_protocol_scope().allow_file(p);
     }
-    let view = j.view(file.as_ref().and_then(|p| p.to_str()));
+    let mut view = j.view(file.as_ref().and_then(|p| p.to_str()));
+    if let Some(link) = &j.shot {
+        let scenes = labels
+            .entry(link.script_id.clone())
+            .or_insert_with(|| s.store.shot_labels(&link.script_id).unwrap_or_default());
+        if let Some(label) = scenes.get(&link.scene_id) {
+            view["shot"]["label"] = json!(label);
+        } else {
+            view["shot"] = Value::Null;
+        }
+    }
     #[cfg(target_os = "linux")]
     if kind(&j.protocol_id) == "video" {
         if let (Some(path), Some(server)) = (&file, app.try_state::<preview::Preview>()) {
@@ -52,10 +66,11 @@ async fn studio_state(app: AppHandle, s: Core<'_>) -> Result<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         let profiles = core.store.profiles()?;
         let official = core.store.resolve("@site", "image")?;
-        let jobs = core.store.jobs()?.iter().map(|j|view(&app,&core,j)).collect::<Vec<_>>();
+        let mut labels = ShotLabels::new();
+        let jobs = core.store.jobs()?.iter().map(|j|view(&app,&core,j,&mut labels)).collect::<Vec<_>>();
         let state = json!({
             "profiles": profiles.iter().map(|p|core.store.profile_view(p)).collect::<Vec<_>>(),
-            "official": core.store.profile_view(&official), "jobs": jobs, "keyStorage": vault::Vault::note(),
+            "official": core.store.profile_view(&official), "jobs": jobs, "comparisons":core.store.comparisons()?, "keyStorage": vault::Vault::note(),
         });
         if std::env::var_os("MOBIUS_SMOKE_TEST").is_some() {
             eprintln!("MOBIUS_WEBVIEW_READY");
@@ -67,10 +82,11 @@ async fn studio_state(app: AppHandle, s: Core<'_>) -> Result<Value> {
 async fn changed_jobs(app: AppHandle, s: Core<'_>, ids: Vec<String>) -> Result<Vec<Value>> {
     let core = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let mut labels = ShotLabels::new();
         ids.iter()
             .map(|id| {
                 let job = core.store.job(id)?;
-                Ok(view(&app, &core, &job))
+                Ok(view(&app, &core, &job, &mut labels))
             })
             .collect()
     })
@@ -131,8 +147,49 @@ async fn generate_script(s: Core<'_>, brief: String, count: usize) -> Result<scr
     s.generate_script(brief, count).await
 }
 #[tauri::command]
+async fn optimize_prompt(s: Core<'_>, input: writer::PromptInput) -> Result<writer::PromptResult> {
+    s.optimize_prompt(input).await
+}
+#[tauri::command]
 fn edit_script(s: Core, id: String, story: screenplay::Screenplay) -> Result<screenplay::Script> {
-    s.store.edit_script(&id, story)
+    let script = s.store.edit_script(&id, story)?;
+    s.changed();
+    Ok(script)
+}
+#[tauri::command]
+fn create_script(s: Core, story: screenplay::Screenplay) -> Result<screenplay::Script> {
+    s.store.create_script(story)
+}
+#[tauri::command]
+async fn list_shot_drafts(s: Core<'_>) -> Result<Vec<shot_drafts::ShotDraft>> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.store.shot_drafts())
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn save_shot_draft(
+    s: Core<'_>,
+    draft: shot_drafts::ShotDraft,
+    picks: Vec<Picked>,
+) -> Result<()> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.store.save_shot_draft(draft, picks))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn start_comparison(s: Core<'_>, inputs: [Start; 2]) -> Result<comparisons::Comparison> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.start_comparison(inputs))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn select_comparison(s: Core, id: String, job_id: String) -> Result<()> {
+    s.store.select_comparison(&id, &job_id)?;
+    s.changed();
+    Ok(())
 }
 #[tauri::command]
 async fn edit_profile(s: Core<'_>, input: Edit) -> Result<String> {
@@ -280,7 +337,7 @@ fn reuse_job(app: AppHandle, s: Core, id: String) -> Result<Value> {
     if let Some(p) = &j.reference {
         picks.push(s.store.register("image", s.store.input(p)?, None)?);
     }
-    Ok(json!({"job":view(&app,&s,&j),"assets":picks}))
+    Ok(json!({"job":view(&app,&s,&j,&mut ShotLabels::new()),"assets":picks}))
 }
 #[tauri::command]
 fn job_frame(s: Core, id: String) -> Result<Picked> {
@@ -289,6 +346,45 @@ fn job_frame(s: Core, id: String) -> Result<Picked> {
         return Err("请选择一张图片。".into());
     }
     s.store.register("image", s.store.original(&j)?, None)
+}
+fn task_info(j: &Job) -> String {
+    let time = j.time();
+    let created = chrono::DateTime::from_timestamp_millis(time)
+        .filter(|_| time > 0)
+        .map(|t| t.to_rfc3339())
+        .unwrap_or_else(|| "未记录".into());
+    let mut lines = vec![
+        format!("本地记录号 {}", j.id),
+        format!(
+            "服务商任务号 {}",
+            provider::protect_text(j.remote_id.as_deref().unwrap_or("未取得"), "")
+        ),
+        format!("模型 {}", provider::protect_text(&j.model, "")),
+        format!("接口协议 {}", j.protocol_id),
+        format!("提交时间 {created}"),
+        format!("任务状态 {}", j.status),
+    ];
+    if let Some(stage) = &j.stopped_during {
+        lines.push(format!("中断阶段 {stage}"));
+    }
+    for prefix in ["HTTP ", "官网返回 "] {
+        if let Some((_, rest)) = j.detail.split_once(prefix) {
+            let code: String = rest
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .take(8)
+                .collect();
+            if !code.is_empty() {
+                lines.push(format!("{prefix}{code}"));
+            }
+        }
+    }
+    lines.join("\n")
+}
+#[tauri::command]
+fn copy_task_info(app: AppHandle, s: Core, id: String) -> Result<()> {
+    let info = task_info(&s.store.job(&id)?);
+    app.clipboard().write_text(info).map_err(|e| e.to_string())
 }
 #[tauri::command]
 async fn copy_job_image(app: AppHandle, s: Core<'_>, id: String, link: bool) -> Result<()> {
@@ -550,6 +646,12 @@ pub fn run() {
             upload_image,
             list_scripts,
             generate_script,
+            optimize_prompt,
+            create_script,
+            list_shot_drafts,
+            save_shot_draft,
+            start_comparison,
+            select_comparison,
             edit_script,
             edit_profile,
             remove_profile,
@@ -564,6 +666,7 @@ pub fn run() {
             reuse_job,
             job_frame,
             copy_job_image,
+            copy_task_info,
             export_job,
             export_input,
             export_rendered,

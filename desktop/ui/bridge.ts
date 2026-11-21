@@ -4,6 +4,12 @@ import type { Bridge } from '../shared'
 import { sizedExport } from './gpuExport'
 import type { PerformanceMode } from '../shared'
 const api: Bridge = {
+  optimizePrompt: input => invoke('optimize_prompt', { input }),
+  createScript: story => invoke('create_script', { story }),
+  shotDrafts: () => invoke('list_shot_drafts'),
+  saveShotDraft: (draft, picks) => invoke('save_shot_draft', { draft, picks }),
+  startComparison: inputs => invoke('start_comparison', { inputs }),
+  selectComparison: (id, jobId) => invoke('select_comparison', { id, jobId }),
   thumbnail: (id) => invoke('job_thumbnail', { id }),
   savePerformance: (mode) => invoke('save_performance', { mode }),
   setFinal: (scriptId, sceneId, kind, jobId) => invoke('set_final', { scriptId, sceneId, kind, jobId }),
@@ -32,6 +38,7 @@ const api: Bridge = {
   frame: (id) => invoke('job_frame', { id }),
   start: (input) => invoke('start_job', { input }),
   resume: (id) => invoke('resume_job', { id }),
+  copyTaskInfo: id => invoke('copy_task_info', { id }),
   reuse: (id) => invoke('reuse_job', { id }),
   open: (id) => invoke('open_file', { id }),
   folder: () => invoke('open_folder'),

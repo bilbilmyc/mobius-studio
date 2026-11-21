@@ -19,6 +19,10 @@ import { creationMock, exerciseCreation } from './creation-matrix.mjs'
 import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
 import { comfyFixture, exerciseComfy, seedGallery, exerciseGallery } from './studio-24.mjs'
 import { backgroundFixture, exerciseBackgroundTasks } from './background-tasks.mjs'
+import { shotFixture, exerciseTwoShots } from './two-shot-workspace.mjs'
+import { exerciseOptimizer, optimizerFixture } from './prompt-optimizer.mjs'
+import { exerciseGenerationOptimization, generationFixture } from './generation-optimization.mjs'
+import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -80,6 +84,17 @@ async function stop() {
   child = undefined
   await browser?.close().catch(() => {})
   browser = undefined
+}
+async function restartNormally() {
+  const exiting = once(child, 'exit')
+  const requested = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    'if (-not ([Diagnostics.Process]::GetProcessById([int]$env:MOBIUS_TEST_PID)).CloseMainWindow()) { exit 1 }'],
+    { env: { ...process.env, MOBIUS_TEST_PID: String(child.pid) }, windowsHide: true })
+  assert.equal(requested.status, 0, 'Could not send a normal window close')
+  await Promise.race([exiting, delay(15000, null, { ref: false }).then(() => { throw Error('Window did not close after flushing drafts') })])
+  await stop()
+  await start()
+  return page
 }
 async function start() {
   const webview = await mkdtemp(path.join(temp, 'WebView-'))
@@ -182,7 +197,7 @@ async function checkBackdrop(moving) {
   }
 }
 
-try {
+async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
   const oldId = 'a'.repeat(32)
@@ -247,9 +262,17 @@ try {
   const workspace = workspaceMock(png)
   const comfy = comfyFixture(png)
   const background = backgroundFixture(clip, still)
+  const twoShots = shotFixture(temp)
+  const optimizer = optimizerFixture(png)
+  const generation = generationFixture(png, clip)
+  const help = taskHelpFixture(png, video)
   const waitingMedia = { 'wan-image': Promise.withResolvers(), 'wan-video': Promise.withResolvers() }
   let imageChecks = 0, videoChecks = 0
   relay = await listen(async (req, res, bytes) => {
+    if (await help.handle(req, res, bytes)) return
+    if (await generation.handle(req, res, bytes)) return
+    if (await optimizer.handle(req, res, bytes)) return
+    if (await twoShots.handle(req, res, bytes)) return
     if (background.handle(req, res, bytes)) return
     if (comfy.handle(req, res, bytes)) return
     if (workspace.handle(req, res, bytes)) return
@@ -367,6 +390,33 @@ try {
   })
   const base = origin(relay) + '/v1'
   await start()
+  const checkShots = () => exerciseTwoShots({ page, base, fixture: twoShots, record, state, shot, restart: restartNormally })
+  const checkOptimizer = () => exerciseOptimizer({ page, base, fixture: optimizer, record, shot, restart: restartNormally,
+    referenceFile: path.join(data, '作品', 'old.png') })
+  const checkGeneration = () => exerciseGenerationOptimization({ page, base, fixture: generation, record, state, done, shot,
+    restart: restartNormally, firstFrame: path.join(data, '作品', 'old.png'), lastFrame: path.join(root, 'src', 'orbit.png'), video,
+    processingTemplate: templates.find(t => t.Video && !t.Text).Key })
+  const checkHelp = () => exerciseTaskHelp({ page, base, fixture: help, record, state, done, shot, restart: restartNormally, video })
+  if (process.argv.includes('--help-only')) {
+    await checkHelp()
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--generation-only')) {
+    await checkGeneration()
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--prompt-only')) {
+    await checkOptimizer()
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--shots-only')) {
+    await checkShots()
+    assert.deepEqual(errors, [])
+    return
+  }
   assert.equal((await state()).jobs.length, 1)
   const service = page.getByLabel('生成服务'),
     tpl = page.getByLabel('官网模板')
@@ -613,7 +663,10 @@ try {
         const timer = page.getByRole('timer')
         assert.match(await timer.innerText(), /已用时\s+\d+:\d{2}/)
         if (media === '图片') {
-          await page.getByText(/进度查询暂时中断/).waitFor()
+          await page.locator('.job-preview').getByText('服务商暂时不可用', { exact: true }).waitFor()
+          const guidance = page.getByRole('group', { name: '处理建议' })
+          await guidance.getByText(/倒计时结束后会自动重查同一任务/).waitFor()
+          assert.match(await guidance.locator('details').textContent(), /进度查询暂时中断.*HTTP 503/)
           await timer.getByText(/后重试/).waitFor()
           await shot('查询自动重试')
           await page.getByText('服务商正在生成。', { exact: true }).waitFor()
@@ -763,10 +816,15 @@ try {
   await exerciseBackgroundTasks({ page, base, fixture: background, record, state, done, shot, png, video,
     restart: async () => { await stop(); await start(); return page } })
   console.log('Screenplay editing, scene handoff, manual and automatic signed uploads, retry and restart passed')
+  console.log('Packaged IPC, 12 RH submissions, third-party protocols, scoped credentials and native video playback passed')
+  await checkShots()
+  await checkOptimizer()
+  await checkGeneration()
+  await checkHelp()
   assert.deepEqual(errors, [])
-  console.log(
-    'Packaged IPC, 12 RH submissions, 7 third-party protocols, restart, scoped credentials and native video playback passed',
-  )
+}
+try {
+  await run()
 } finally {
   await stop()
   await closeServer(files)

@@ -329,3 +329,24 @@ fn contain_export_composites_every_pixel_onto_opaque_black() {
     assert_eq!(pixels.get_pixel(1, 2).0, [0, 0, 240, 255]);
     assert_eq!(pixels.get_pixel(0, 0).0, [0, 0, 0, 255]);
 }
+#[test]
+fn support_copy_contains_task_identifiers_and_error_code_only() {
+    let mut j = crate::model::Job {
+        id: "local-record".into(),
+        remote_id: Some("upstream-ticket".into()),
+        prompt: "private creative text".into(),
+        base_url: "https://private.invalid".into(),
+        result_url: Some("https://private.invalid/asset?secret=key".into()),
+        detail: "HTTP 403 error detail with private text".into(),
+        ..Default::default()
+    };
+    let summary = crate::task_info(&j);
+    assert!(
+        summary.contains("local-record")
+            && summary.contains("upstream-ticket")
+            && summary.contains("HTTP 403")
+    );
+    assert!(!summary.contains("private") && !summary.contains("secret="));
+    j.remote_id = j.result_url.take();
+    assert!(!crate::task_info(&j).contains("private"));
+}

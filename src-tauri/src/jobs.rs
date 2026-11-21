@@ -12,7 +12,7 @@ use std::{
     collections::HashSet,
     fs,
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -52,6 +52,19 @@ impl Studio {
         (self.notify)(Some(id));
     }
     fn update(&self, j: &mut Job, status: &str, detail: &str) -> Result<()> {
+        if status != j.status || detail != j.detail {
+            j.progress_at = Some(Utc::now().timestamp_millis());
+        }
+        if matches!(status, "paused" | "failed" | "uncertain") {
+            if matches!(
+                j.status.as_str(),
+                "preparing" | "submitting" | "waiting" | "downloading"
+            ) {
+                j.stopped_during = Some(j.status.clone());
+            }
+        } else {
+            j.stopped_during = None;
+        }
         j.status = status.into();
         j.detail = detail.into();
         self.store.save_job(j)?;
@@ -59,6 +72,12 @@ impl Studio {
         Ok(())
     }
     pub fn prepare(&self, i: Start) -> Result<Job> {
+        let j = self.build_job(i)?;
+        self.store.save_job(&j)?;
+        self.job_changed(&j.id);
+        Ok(j)
+    }
+    pub(crate) fn build_job(&self, i: Start) -> Result<Job> {
         if !matches!(i.kind.as_str(), "image" | "video") {
             return Err("媒体类型无效".into());
         }
@@ -133,15 +152,13 @@ impl Studio {
             || j.site_options
                 .as_ref()
                 .is_some_and(|s| !s.assets.is_empty());
-        self.update(
-            &mut j,
-            if prep { "preparing" } else { "submitting" },
-            if prep {
-                "正在准备本地素材。"
-            } else {
-                "正在向所选服务提交。"
-            },
-        )?;
+        j.status = if prep { "preparing" } else { "submitting" }.into();
+        j.detail = if prep {
+            "正在准备本地素材。"
+        } else {
+            "正在向所选服务提交。"
+        }
+        .into();
         Ok(j)
     }
     pub fn launch(self: &Arc<Self>, mut j: Job, submit: bool) -> Result<()> {
@@ -191,6 +208,7 @@ impl Studio {
         )
     }
     pub fn recover(self: &Arc<Self>) -> Result<()> {
+        self.store.recover_comparisons()?;
         for mut j in self.store.jobs()? {
             if j.status == "done" {
                 if let Some(copy) = j
@@ -348,7 +366,7 @@ impl Studio {
     }
     async fn poll_result(&self, j: &mut Job, key: &str) -> provider::Reply<Output> {
         const RETRIES: u32 = 3;
-        if j.retry_at.is_none() {
+        if j.retry_at.is_none() && j.status != "waiting" {
             self.update(j, "waiting", "已取得任务编号，正在查询进度。")?;
         } else if j.status != "waiting" {
             self.update(j, "waiting", "已保留原任务，将在等待期结束后继续查询。")?;
@@ -394,7 +412,10 @@ impl Studio {
                     self.update(
                         j,
                         "waiting",
-                        &format!("进度查询暂时中断，将自动重试（{failures}/{RETRIES}）。"),
+                        &format!(
+                            "进度查询暂时中断，将自动重试（{failures}/{RETRIES}）。{}",
+                            error.message
+                        ),
                     )?;
                 }
             }
@@ -467,44 +488,45 @@ impl Studio {
     }
 }
 async fn keep(home: PathBuf, path: PathBuf, folder: &'static str) -> Result<String> {
-    tokio::task::spawn_blocking(move || {
-        let path = path.canonicalize().map_err(|e| e.to_string())?;
-        if mime(&path).is_none() {
-            return Err("素材文件类型无效".into());
+    tokio::task::spawn_blocking(move || keep_asset(&home, &path, folder))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn keep_asset(home: &Path, path: &Path, folder: &str) -> Result<String> {
+    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    if mime(&path).is_none() {
+        return Err("素材文件类型无效".into());
+    }
+    if let Ok(rel) = path.strip_prefix(home) {
+        if rel.components().count() == 2 && (rel.starts_with("作品") || rel.starts_with(folder)) {
+            return Ok(rel.to_string_lossy().replace('\\', "/"));
         }
-        if let Ok(rel) = path.strip_prefix(&home) {
-            if rel.components().count() == 2 && (rel.starts_with("作品") || rel.starts_with(folder))
-            {
-                return Ok(rel.to_string_lossy().replace('\\', "/"));
-            }
+    }
+    let dir = home.join(folder);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut from = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&dir).map_err(|e| e.to_string())?;
+    let mut hash = Sha256::new();
+    let mut buf = vec![0; 131072];
+    loop {
+        let n = from.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
         }
-        let dir = home.join(folder);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let mut from = fs::File::open(&path).map_err(|e| e.to_string())?;
-        let mut tmp = tempfile::NamedTempFile::new_in(&dir).map_err(|e| e.to_string())?;
-        let mut hash = Sha256::new();
-        let mut buf = vec![0; 131072];
-        loop {
-            let n = from.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buf[..n]);
-            tmp.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        hash.update(&buf[..n]);
+        tmp.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+    }
+    let name = format!(
+        "{:x}.{}",
+        hash.finalize(),
+        path.extension().unwrap().to_string_lossy().to_lowercase()
+    );
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    if let Err(e) = tmp.persist_noclobber(dir.join(&name)) {
+        if e.error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(e.to_string());
         }
-        let name = format!(
-            "{:x}.{}",
-            hash.finalize(),
-            path.extension().unwrap().to_string_lossy().to_lowercase()
-        );
-        tmp.as_file().sync_all().map_err(|e| e.to_string())?;
-        if let Err(e) = tmp.persist_noclobber(dir.join(&name)) {
-            if e.error.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e.to_string());
-            }
-        }
-        Ok(format!("{folder}/{name}"))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
+    Ok(format!("{folder}/{name}"))
 }

@@ -48,14 +48,16 @@ export function Prompt({
   value,
   change,
   hint,
+  tools,
 }: {
   value: string
   change: (s: string) => void
   hint: string
+  tools?: React.ReactNode
 }) {
   const box = useRef<HTMLTextAreaElement>(null),
     big = useRef<HTMLTextAreaElement>(null)
-  const [draft, setDraft] = useState<string | null>(null),
+  const [original, setOriginal] = useState<string | null>(null),
     selection = useRef([0, 0])
   useLayoutEffect(() => {
     const el = box.current
@@ -64,7 +66,7 @@ export function Prompt({
       el.style.height = Math.min(206, Math.max(98, el.scrollHeight + 2)) + 'px'
     }
   }, [value, hint])
-  const expanded = draft !== null
+  const expanded = original !== null
   useEffect(() => {
     if (expanded && big.current) {
       big.current.focus()
@@ -76,8 +78,8 @@ export function Prompt({
       save && big.current
         ? [big.current.selectionStart, big.current.selectionEnd]
         : selection.current
-    if (save && draft !== null) change(draft)
-    setDraft(null)
+    if (!save && original !== null && value !== original) change(original)
+    setOriginal(null)
     requestAnimationFrame(() => {
       box.current?.focus()
       box.current?.setSelectionRange(pos[0], pos[1])
@@ -88,6 +90,7 @@ export function Prompt({
       <div className="label-row">
         <label htmlFor="prompt">提示词</label>
         <small>{count(value)} 字</small>
+        {tools}
         <button
           className="link"
           onClick={() => {
@@ -95,7 +98,7 @@ export function Prompt({
               box.current!.selectionStart,
               box.current!.selectionEnd,
             ]
-            setDraft(value)
+            setOriginal(value)
           }}
         >
           展开编辑 ↗
@@ -110,15 +113,15 @@ export function Prompt({
         onChange={(e) => change(e.target.value)}
         spellCheck={false}
       />
-      {draft !== null && (
+      {expanded && (
         <Modal title="编辑提示词" close={() => finish(false)} wide>
           <textarea
             ref={big}
             className="big-editor"
             aria-label="完整提示词"
             spellCheck={false}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={value}
+            onChange={(e) => change(e.target.value)}
             onKeyDown={(e) => {
               if (
                 (e.ctrlKey || e.metaKey) &&
@@ -132,7 +135,7 @@ export function Prompt({
             }}
           />
           <footer className="modal-actions">
-            <small>{count(draft)} 字　·　Ctrl / ⌘ + Enter 完成</small>
+            <small>{count(value)} 字　·　Ctrl / ⌘ + Enter 完成</small>
             <button onClick={() => finish(false)}>取消</button>
             <button className="primary" onClick={() => finish(true)}>
               完成

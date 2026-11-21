@@ -27,12 +27,19 @@ impl Fault {
             poll_retry_after: None,
         }
     }
-    fn transport(error: reqwest::Error) -> Self {
+    pub(crate) fn transport(error: reqwest::Error) -> Self {
         let transient =
             error.is_timeout() || error.is_connect() || error.is_body() || error.is_request();
+        let reason = if error.is_timeout() {
+            "等待服务响应超时"
+        } else if error.is_connect() {
+            "无法连接服务"
+        } else {
+            "服务连接中断"
+        };
         Self {
             poll_retry_after: transient.then_some(Duration::ZERO),
-            ..Self::uncertain(error.without_url())
+            ..Self::uncertain(format!("{reason}。{}", error.without_url()))
         }
     }
 }
@@ -152,10 +159,19 @@ pub(crate) async fn response_json(reply: reqwest::Response, key: &str) -> Reply<
             .or_else(|| text(&v, "message"))
             .or_else(|| text(&v, "msg"))
             .unwrap_or_default();
+        let code = text(&v, "error.code")
+            .or_else(|| text(&v, "code"))
+            .or_else(|| text(&v, "error.type"))
+            .unwrap_or_default();
+        let detail = protect_text(&format!("{code} {msg}"), key);
+        let billing = matches!(
+            code.to_ascii_lowercase().as_str(),
+            "insufficient_quota" | "insufficient_balance" | "billing_hard_limit_reached"
+        );
         return Err(Fault {
-            message: format!("HTTP {} {}", status.as_u16(), protect_text(&msg, key)),
-            definite: status.is_client_error() && status.as_u16() != 408,
-            poll_retry_after: retry,
+            message: format!("HTTP {} {detail}", status.as_u16()),
+            definite: status.is_client_error() && !matches!(status.as_u16(), 408 | 409 | 499),
+            poll_retry_after: if billing { None } else { retry },
         });
     }
     Ok(serde_json::from_slice(&body.map_err(Fault::transport)?).ok())
@@ -169,7 +185,7 @@ fn envelope(v: Value, key: &str) -> Reply<Value> {
     } else {
         Err(Fault {
             message: format!("官网返回 {code} {}", protect_text(string(&v["msg"]), key)),
-            definite: (400..500).contains(&code) && code != 408,
+            definite: (400..500).contains(&code) && !matches!(code, 408 | 409 | 499),
             poll_retry_after: poll_retry_after(code, None),
         })
     }
@@ -553,14 +569,17 @@ pub async fn query(h: &Client, j: &Job, key: &str) -> Reply<Output> {
     }
     if member(
         r.map(|d| d.failure.as_str())
-            .unwrap_or("failed,cancelled,canceled,expired,unknown"),
+            .unwrap_or("failed,cancelled,canceled,expired"),
     ) {
         let msg = text(&v, r.map(|d| d.error.as_str()).unwrap_or("error.message"))
             .or_else(|| text(&v, "display_error_message"))
             .or_else(|| text(&v, "error_message"))
             .or_else(|| text(&v, "output.message"))
             .unwrap_or(state);
-        return Ok(Output::Failed(protect_text(&msg, key)));
+        let code = text(&v, "error.code")
+            .or_else(|| text(&v, "output.code"))
+            .unwrap_or_default();
+        return Ok(Output::Failed(protect_text(&format!("{code} {msg}"), key)));
     }
     if !member(
         r.map(|d| d.success.as_str())
@@ -625,10 +644,7 @@ pub async fn download(h: &Client, j: &Job, raw: &str, key: &str) -> Reply<reqwes
         {
             req = auth(req, "bearer", key);
         }
-        let reply = req
-            .send()
-            .await
-            .map_err(|e| Fault::known(e.without_url()))?;
+        let reply = req.send().await.map_err(Fault::transport)?;
         if reply.status().is_redirection() {
             let loc = reply
                 .headers()
