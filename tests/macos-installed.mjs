@@ -11,15 +11,17 @@ import { verifyPut } from './workspace-flows.mjs'
 const [binary, data] = process.argv.slice(2)
 const id = randomUUID().replaceAll('-', '')
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPQqHkGAAJaAYvrcg4EAAAAAElFTkSuQmCC', 'base64')
-let uploaded = 0, fault
+let downloads = 0, puts = 0, uploaded = 0, fault
 const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/original.png') {
+      downloads++
       res.setHeader('Content-Type', 'image/png')
       res.end(png)
       return
     }
     const url = new URL(req.url, 'http://' + req.headers.host)
+    puts++
     assert.equal(url.pathname, '/test-bucket/stills/' + id + '.png')
     assert.equal(req.method, 'PUT')
     verifyPut(req, url)
@@ -38,9 +40,10 @@ const record = path.join(data, 'tasks', id + '.json')
 let child, keyCreated = false, log = ''
 try {
   await mkdir(path.dirname(record), { recursive: true })
-  // Trust just the installed test copy with this disposable Keychain item.
+  // The CLI creates the synthetic item on behalf of an ad-hoc signed app. Let the
+  // headless runner read just this disposable fixture without a Keychain consent dialog.
   execFileSync('security', ['add-generic-password', '-s', service, '-a', account,
-    '-w', 'storage-fixture-secret', '-T', binary])
+    '-w', 'storage-fixture-secret', '-A'])
   keyCreated = true
   await writeFile(path.join(data, 'settings.json'), JSON.stringify({
     storage: { endpoint, bucket: 'test-bucket', prefix: 'stills', region: 'auto', accessKey: 'storage-fixture', automatic: true },
@@ -65,7 +68,12 @@ try {
   assert.ok(log.includes('MOBIUS_WEBVIEW_READY'), log)
   assert.equal(job.Status, 'done')
   assert.equal(job.Cloud?.uri, 's3://test-bucket/stills/' + id + '.png')
-  assert.equal(job.Cloud.status, 'saved')
+  if (job.Cloud.status !== 'saved') {
+    const sample = execFileSync('sample', [String(child.pid), '1', '-file', path.join(data, 'sample.txt')], {encoding:'utf8'})
+    const stacks = (await readFile(path.join(data, 'sample.txt'), 'utf8')).split('\n')
+      .filter(line => /SecItemCopyMatching|SecKeychain|put_image|vault::|upload_image/.test(line)).slice(0, 14)
+    throw Error(`Mac upload stalled at ${job.Cloud.status}; GET=${downloads} PUT=${puts}\n${sample}\n${stacks.join('\n')}`)
+  }
   assert.deepEqual(await readFile(path.join(data, '作品', job.FileName)), png)
   assert.equal(uploaded, 1)
   console.log('Installed arm64 app started its WebView, recovered a download, and uploaded the original PNG with a verified S3 signature.')
