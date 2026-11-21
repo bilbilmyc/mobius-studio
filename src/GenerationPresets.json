@@ -1,0 +1,11 @@
+{
+  "openai-image":{"title":"OpenAI 兼容图片","base":"","model":"","modes":["t2i","i2i"],"sizes":["1024x1024","1536x1024","1024x1536","auto"],"seconds":[],"resolutions":[],"maxImages":16},
+  "openai-video":{"title":"OpenAI 兼容视频","base":"","model":"","modes":["t2v","first_frame"],"sizes":["1280x720","720x1280","1792x1024","1024x1792"],"seconds":[4,8,12],"resolutions":[]},
+  "wan-image":{"title":"万相 2.7 · 图片生成与编辑","base":"","model":"wan2.7-image","modes":["t2i","i2i"],"sizes":["2048x2048","2304x1728","1728x2304","1024x1024"],"seconds":[],"resolutions":[],"maxImages":9},
+  "wan-video":{"title":"万相 · 文生视频","base":"","model":"wan2.6-t2v","modes":["t2v"],"sizes":["1280x720","720x1280","960x960","1920x1080","1080x1920"],"seconds":[5,10,15],"resolutions":[]},
+  "wan-i2v-video":{"title":"万相 · 首帧图生视频","base":"","model":"wan2.6-i2v-flash","modes":["first_frame"],"sizes":["adaptive"],"seconds":[5,2,3,4,6,7,8,9,10,11,12,13,14,15],"resolutions":["720P","1080P"]},
+  "wan-frames-video":{"title":"万相 · 首尾帧视频","base":"","model":"wan2.2-kf2v-flash","modes":["first_last"],"sizes":["adaptive"],"seconds":[5],"resolutions":["720P","480P","1080P"]},
+  "ark-video":{"title":"火山方舟 Seedance","base":"https://ark.cn-beijing.volces.com/api/v3","model":"doubao-seedance-2-5-260628","modes":["t2v","first_frame","first_last","reference"],"sizes":["16:9","9:16","1:1","4:3","3:4","21:9","adaptive"],"seconds":[5,4,6,7,8,9,10,11,12,13,14,15],"resolutions":["720p","480p","1080p"],"maxImages":9},
+  "relay-image":{"title":"自定义图片接口","base":"","model":"","modes":["t2i"],"sizes":["1024x1024","1536x1024","1024x1536"],"seconds":[],"resolutions":[],"maxImages":16},
+  "relay-video":{"title":"自定义视频接口","base":"","model":"","modes":["t2v"],"sizes":["16:9","9:16","1:1"],"seconds":[5,10,15],"resolutions":[],"maxImages":16}
+}

@@ -1,0 +1,40 @@
+name: macOS Apple Silicon DMG
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  dmg:
+    name: Build and test on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check native toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          rustup default stable
+          rustc -vV | grep -Fx 'host: aarch64-apple-darwin'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run installer -- --arch=arm64
+      - name: Run native regression tests
+        run: |
+          npm run build
+          cargo test --locked --release --features custom-protocol,installed --manifest-path src-tauri/Cargo.toml
+      - name: Verify, install and launch the DMG
+        run: bash tests/macos-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mobius-macOS-arm64
+          path: dist/*.dmg
+          compression-level: 0
+          if-no-files-found: error

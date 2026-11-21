@@ -1,0 +1,36 @@
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import type { Bridge } from '../shared'
+const api: Bridge = {
+  settings: () => invoke('integration_settings'),
+  saveWriter: (input) => invoke('save_writer', { input }),
+  saveStorage: (target, secret) => invoke('save_storage', { target, secret }),
+  uploadImage: (id) => invoke('upload_image', { id }),
+  scripts: () => invoke('list_scripts'),
+  generateScript: (brief, count) => invoke('generate_script', { brief, count }),
+  editScript: (id, story) => invoke('edit_script', { id, story }),
+  exportFile: (id, resize, chooseLocation) =>
+    invoke('export_job', { id, resize, chooseLocation }),
+  link: (kind, url) => invoke('add_link', { kind, url }),
+  preview: (item) => invoke('asset_preview', { item }),
+  state: () => invoke('studio_state'),
+  save: (input) => invoke('edit_profile', { input }),
+  remove: (id) => invoke('remove_profile', { id }),
+  models: (input) => invoke('list_models', { input }),
+  pick: (kind, multiple) => invoke('pick_files', { kind, multiple }),
+  drop: (kind, paths) => invoke('add_files', { kind, paths }),
+  frame: (id) => invoke('job_frame', { id }),
+  start: (input) => invoke('start_job', { input }),
+  resume: (id) => invoke('resume_job', { id }),
+  reuse: (id) => invoke('reuse_job', { id }),
+  open: (id) => invoke('open_file', { id }),
+  folder: () => invoke('open_folder'),
+  web: (prompt) => invoke('open_web', { prompt }),
+  changed: (cb) => {
+    const off = listen('jobs-changed', cb)
+    return () => {
+      void off.then((fn) => fn())
+    }
+  },
+}
+window.studio = api

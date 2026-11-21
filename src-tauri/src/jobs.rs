@@ -1,0 +1,444 @@
+use crate::{
+    model::*,
+    provider::{self, Fault, Output},
+    store::{media_format, mime, Store},
+};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashSet,
+    fs,
+    io::{Read, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+pub struct Studio {
+    pub store: Store,
+    pub http: reqwest::Client,
+    pub(crate) cloud_transfer: tokio::sync::Mutex<()>,
+    active: Mutex<HashSet<String>>,
+    notify: Box<dyn Fn() + Send + Sync>,
+    pub poll: Duration,
+}
+impl Studio {
+    pub fn new(store: Store, notify: impl Fn() + Send + Sync + 'static) -> Result<Self> {
+        Ok(Self {
+            store,
+            http: provider::client()?,
+            cloud_transfer: Default::default(),
+            active: Default::default(),
+            notify: Box::new(notify),
+            poll: Duration::from_secs(5),
+        })
+    }
+    pub fn changed(&self) {
+        (self.notify)()
+    }
+    fn update(&self, j: &mut Job, status: &str, detail: &str) -> Result<()> {
+        j.status = status.into();
+        j.detail = detail.into();
+        self.store.save_job(j)?;
+        self.changed();
+        Ok(())
+    }
+    pub fn prepare(&self, i: Start) -> Result<Job> {
+        if !matches!(i.kind.as_str(), "image" | "video") {
+            return Err("媒体类型无效".into());
+        }
+        let mut p = self.store.resolve(&i.profile_id, &i.kind)?;
+        if kind(&p.protocol_id) != i.kind {
+            return Err("连接与媒体类型不匹配".into());
+        }
+        if !site(&p.protocol_id) {
+            if let Some(model) = i.model {
+                if model != p.model && !p.models.contains(&model) {
+                    return Err("当前连接未配置这个模型，请重新选择。".into());
+                }
+                p.model = model;
+            }
+        }
+        let key = self.store.vault.get(&p, &p.base_url)?;
+        if site(&p.protocol_id) && key.is_empty() {
+            return Err("请先连接此官网的 OpenAPI Key。".into());
+        }
+        let assets = self.store.assets(&i.assets)?;
+        let mut j = Job {
+            id: id(),
+            profile_id: p.id,
+            profile_name: p.name,
+            protocol_id: p.protocol_id,
+            base_url: p.base_url,
+            model: p.model,
+            prompt: i.prompt,
+            size: i.size,
+            seconds: i.seconds,
+            relay: p.relay,
+            created_utc: format!("/Date({})/", Utc::now().timestamp_millis()),
+            ..Default::default()
+        };
+        if site(&j.protocol_id) {
+            let t = template(&i.template).ok_or("官网模板不存在")?;
+            if t["Video"] != (i.kind == "video") {
+                return Err("模板类型错误".into());
+            }
+            let s = SiteOptions {
+                config: i.config,
+                priority: i.priority,
+                assets,
+            };
+            validate_template(t, &s, &j.prompt)?;
+            if t["Text"].is_null() {
+                j.prompt.clear()
+            }
+            j.model = i.template;
+            j.size = ["aspect", "ratio", "resolution"]
+                .iter()
+                .find_map(|k| s.config.get(*k)?.as_str())
+                .unwrap_or("")
+                .into();
+            j.seconds = s
+                .config
+                .get("duration")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            j.site_options = Some(s);
+        } else {
+            j.settings = i.config;
+            j.assets = assets;
+            crate::creation::prepare(&mut j, p.controls.as_ref(), &self.store)?;
+        }
+        let prep = !j.assets.is_empty()
+            || j.reference.is_some()
+            || j.site_options
+                .as_ref()
+                .is_some_and(|s| !s.assets.is_empty());
+        self.update(
+            &mut j,
+            if prep { "preparing" } else { "submitting" },
+            if prep {
+                "正在准备本地素材。"
+            } else {
+                "正在向所选服务提交。"
+            },
+        )?;
+        Ok(j)
+    }
+    pub fn launch(self: &Arc<Self>, mut j: Job, submit: bool) -> Result<()> {
+        {
+            let mut active = self.active.lock().unwrap();
+            if !active.insert(j.id.clone()) {
+                return Ok(());
+            }
+            if j.status == "paused" && !submit {
+                let status = if j.result_url.is_some() {
+                    "downloading"
+                } else {
+                    "waiting"
+                };
+                if let Err(e) = self.update(&mut j, status, "正在恢复已提交的任务。") {
+                    active.remove(&j.id);
+                    return Err(e);
+                }
+            }
+        }
+        let s = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let outcome = s.run(&mut j, submit).await;
+            // Publish the paused status and release ownership under the same lock as resume.
+            let mut active = s.active.lock().unwrap();
+            if let Err(err) = outcome {
+                let status = if j.remote_id.is_some() || j.result_url.is_some() {
+                    "paused"
+                } else if err.definite || j.status == "preparing" {
+                    "failed"
+                } else {
+                    "uncertain"
+                };
+                let _ = s.update(&mut j, status, &err.message);
+            }
+            active.remove(&j.id);
+        });
+        Ok(())
+    }
+    fn stem(&self, j: &Job) -> String {
+        format!(
+            "{}-{}",
+            DateTime::from_timestamp_millis(j.time())
+                .unwrap_or_default()
+                .format("%Y%m%d-%H%M%S"),
+            j.id
+        )
+    }
+    pub fn recover(self: &Arc<Self>) -> Result<()> {
+        for mut j in self.store.jobs()? {
+            if j.status == "done" {
+                if let Some(copy) = j
+                    .cloud
+                    .as_mut()
+                    .filter(|c| matches!(c.status.as_str(), "uploading" | "pending"))
+                {
+                    copy.status = "failed".into();
+                    copy.detail = "上次上传中断，可在作品里重试。".into();
+                    self.store.save_job(&j)?;
+                }
+                continue;
+            }
+            if !matches!(
+                j.status.as_str(),
+                "preparing" | "submitting" | "waiting" | "paused" | "downloading"
+            ) {
+                continue;
+            }
+            let stem = self.stem(&j);
+            let options = if kind(&j.protocol_id) == "video" {
+                vec!["mp4", "webm"]
+            } else {
+                vec!["png", "jpg", "webp", "gif"]
+            };
+            if let Some(name) = options
+                .into_iter()
+                .map(|e| format!("{stem}.{e}"))
+                .find(|f| self.store.home.join("作品").join(f).is_file())
+            {
+                j.file_name = Some(name);
+                j.result_url = None;
+                self.plan_image_copy(&mut j);
+                self.update(&mut j, "done", "已保存原文件。")?;
+                if j.cloud.as_ref().is_some_and(|c| c.status == "pending") {
+                    let studio = self.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = studio.upload_image(&j.id, true).await;
+                    });
+                }
+                continue;
+            }
+            match j.status.as_str() {
+                "preparing" => self.launch(j, true)?,
+                "paused" => (),
+                _ if j.remote_id.is_some() || j.result_url.is_some() => self.launch(j, false)?,
+                _ => self.update(
+                    &mut j,
+                    "uncertain",
+                    "提交中断且尚未收到编号，请先核对服务商记录。",
+                )?,
+            }
+        }
+        Ok(())
+    }
+    pub async fn run(&self, j: &mut Job, submit: bool) -> std::result::Result<(), Fault> {
+        let key = if site(&j.protocol_id) && !submit {
+            String::new()
+        } else {
+            self.store.key(j)?
+        };
+        if !submit {
+            if let Some(url) = j.result_url.clone() {
+                match self.finish(j, Output::Url(url), &key).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) if j.remote_id.is_none() => return Err(e),
+                    _ => (),
+                }
+            }
+        }
+        let mut result = Output::Pending;
+        if submit {
+            let mut uploaded = json!({});
+            if let Some(options) = j.site_options.as_mut() {
+                for a in &mut options.assets {
+                    if crate::creation::remote(&a.path) {
+                        continue;
+                    }
+                    a.path = keep(
+                        self.store.home.clone(),
+                        self.store.input(&a.path)?,
+                        "参考素材",
+                    )
+                    .await?
+                }
+            }
+            for a in &mut j.assets {
+                if !crate::creation::remote(&a.path) {
+                    a.path = keep(
+                        self.store.home.clone(),
+                        self.store.input(&a.path)?,
+                        "参考素材",
+                    )
+                    .await?;
+                }
+            }
+            if let Some(reference) = j.reference.clone() {
+                j.reference = Some(
+                    keep(
+                        self.store.home.clone(),
+                        self.store.input(&reference)?,
+                        "首帧",
+                    )
+                    .await?,
+                )
+            }
+            self.store.save_job(j)?;
+            if let Some(s) = &j.site_options {
+                for a in &s.assets {
+                    let path = if crate::creation::remote(&a.path) {
+                        a.path.clone()
+                    } else {
+                        provider::upload(&self.http, j, &key, a, &self.store.input(&a.path)?)
+                            .await?
+                    };
+                    let list = uploaded
+                        .as_object_mut()
+                        .unwrap()
+                        .entry(&a.kind)
+                        .or_insert_with(|| json!([]));
+                    list.as_array_mut().unwrap().push(json!(path));
+                }
+            }
+            let mut inputs = Vec::new();
+            for a in &j.assets {
+                inputs.push(crate::inputs::Input::from_asset(&self.store, a)?);
+            }
+            if let Some(path) = &j.reference {
+                let p = self.store.input(path)?;
+                inputs.push(crate::inputs::Input::local(
+                    "image",
+                    p.file_name().unwrap_or_default().to_string_lossy().into(),
+                    p,
+                ));
+            }
+            self.update(j, "submitting", "正在向所选服务提交。")?;
+            result = provider::submit(&self.http, j, &key, uploaded, &inputs).await?;
+            if let Output::Ticket(id) = &result {
+                j.remote_id = Some(id.clone());
+                self.store.save_job(j)?
+            }
+        }
+        if j.remote_id.is_some() {
+            self.update(j, "waiting", "已取得任务编号，正在查询进度。")?;
+            loop {
+                result = provider::query(&self.http, j, &key).await?;
+                if !matches!(result, Output::Pending) {
+                    break;
+                }
+                tokio::time::sleep(self.poll).await;
+            }
+        }
+        if let Output::Failed(msg) = result {
+            self.update(j, "failed", &msg)?;
+            return Ok(());
+        }
+        self.finish(j, result, &key).await
+    }
+    async fn finish(
+        &self,
+        j: &mut Job,
+        result: Output,
+        key: &str,
+    ) -> std::result::Result<(), Fault> {
+        if let Output::Url(u) = &result {
+            j.result_url = Some(u.clone())
+        }
+        self.update(j, "downloading", "正在保存原文件。")?;
+        let dir = self.store.home.join("作品");
+        let stage = tempfile::NamedTempFile::new_in(&dir).map_err(Fault::known)?;
+        let mut file = tokio::fs::File::from_std(stage.reopen().map_err(Fault::known)?);
+        match result {
+            Output::Url(u) => {
+                let response = provider::download(&self.http, j, &u, key).await?;
+                let expected = response.content_length();
+                let mut n = 0u64;
+                let mut chunks = response.bytes_stream();
+                while let Some(chunk) = chunks.next().await {
+                    let b = chunk.map_err(|e| Fault::known(e.without_url()))?;
+                    n += b.len() as u64;
+                    file.write_all(&b).await.map_err(Fault::known)?
+                }
+                if expected.is_some_and(|len| len != n) {
+                    return Err(Fault::known("文件未完整下载。"));
+                }
+            }
+            Output::Inline(s) => {
+                let raw = if s.starts_with("data:") {
+                    s.split_once(',')
+                        .map(|x| x.1)
+                        .ok_or_else(|| Fault::known("Base64 地址无效"))?
+                } else {
+                    &s
+                };
+                let bytes = STANDARD.decode(raw).map_err(Fault::known)?;
+                file.write_all(&bytes).await.map_err(Fault::known)?
+            }
+            _ => return Err(Fault::uncertain("响应中缺少媒体。")),
+        }
+        file.sync_all().await.map_err(Fault::known)?;
+        drop(file);
+        let mut header = [0; 16];
+        let n = tokio::fs::File::open(stage.path())
+            .await
+            .map_err(Fault::known)?
+            .read(&mut header)
+            .await
+            .map_err(Fault::known)?;
+        let ext = media_format(&header[..n], kind(&j.protocol_id) == "video")?;
+        let name = format!("{}.{}", self.stem(j), ext);
+        let destination = dir.join(&name);
+        tokio::task::spawn_blocking(move || crate::store::persist(stage, &destination))
+            .await
+            .map_err(Fault::known)??;
+        j.file_name = Some(name);
+        j.result_url = None;
+        self.plan_image_copy(j);
+        self.update(j, "done", "已保存到作品目录。")?;
+        if j.cloud.as_ref().is_some_and(|c| c.status == "pending") {
+            let _ = self.upload_image(&j.id, true).await;
+        }
+        Ok(())
+    }
+}
+async fn keep(home: PathBuf, path: PathBuf, folder: &'static str) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let path = path.canonicalize().map_err(|e| e.to_string())?;
+        if mime(&path).is_none() {
+            return Err("素材文件类型无效".into());
+        }
+        if let Ok(rel) = path.strip_prefix(&home) {
+            if rel.components().count() == 2 && (rel.starts_with("作品") || rel.starts_with(folder))
+            {
+                return Ok(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        let dir = home.join(folder);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut from = fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut tmp = tempfile::NamedTempFile::new_in(&dir).map_err(|e| e.to_string())?;
+        let mut hash = Sha256::new();
+        let mut buf = vec![0; 131072];
+        loop {
+            let n = from.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buf[..n]);
+            tmp.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        }
+        let name = format!(
+            "{:x}.{}",
+            hash.finalize(),
+            path.extension().unwrap().to_string_lossy().to_lowercase()
+        );
+        tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+        if let Err(e) = tmp.persist_noclobber(dir.join(&name)) {
+            if e.error.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e.to_string());
+            }
+        }
+        Ok(format!("{folder}/{name}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

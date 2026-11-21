@@ -1,0 +1,72 @@
+name: Desktop installers and portable builds
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025, arch: x64, platform: Windows }
+          - { os: windows-11-arm, arch: arm64, platform: Windows }
+          - { os: ubuntu-24.04, arch: x64, platform: Linux }
+          - { os: ubuntu-24.04-arm, arch: arm64, platform: Linux }
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev webkit2gtk-driver xvfb xauth dbus-x11 ffmpeg gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+      - run: rustup default stable
+      - if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            $llvm = Join-Path $env:ProgramFiles 'LLVM\bin'
+            if (-not (Test-Path -LiteralPath (Join-Path $llvm 'clang.exe'))) {
+              choco install llvm --yes --no-progress
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $llvm 'clang.exe'))) { throw 'ARM64 build requires clang' }
+            $llvm >> $env:GITHUB_PATH
+          }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run package -- --arch=${{ matrix.arch }}
+      - run: npm run installer -- --arch=${{ matrix.arch }}
+      - run: npm run build
+      - run: cargo test --locked --release --features custom-protocol,installed --manifest-path src-tauri/Cargo.toml
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg --yes --no-progress }
+          $setup = Get-Item dist/*-setup.exe
+          $dest = Join-Path $env:RUNNER_TEMP 'mobius-install-test'
+          $installed = Start-Process -FilePath $setup.FullName -ArgumentList "/S /D=$dest" -Wait -PassThru -WindowStyle Hidden
+          if ($installed.ExitCode) { throw "Installer failed ($($installed.ExitCode))" }
+          node tests/desktop-ui.mjs (Join-Path $dest 'mobius-studio.exe')
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $removed = Start-Process -FilePath (Join-Path $dest 'uninstall.exe') -ArgumentList "/S _?=$dest" -Wait -PassThru -WindowStyle Hidden
+          if ($removed.ExitCode -or (Test-Path -LiteralPath (Join-Path $dest 'mobius-studio.exe'))) { throw "Uninstall failed" }
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          test "$(dpkg-query -W -f='${Architecture}' mobius-studio)" = "$(dpkg --print-architecture)"
+          ffmpeg -v error -f lavfi -i color=c=blue:s=96x64:d=1 -pix_fmt yuv420p -c:v libx264 -threads 1 -movflags +faststart "$RUNNER_TEMP/mobius-fixture.mp4"
+          xvfb-run -a dbus-run-session -- python3 tests/linux-webview.py /usr/bin/mobius-studio "$RUNNER_TEMP/mobius-fixture.mp4"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mobius-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*-setup.exe
+            dist/*.deb

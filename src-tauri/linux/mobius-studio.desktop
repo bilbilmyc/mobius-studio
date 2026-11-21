@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=莫比环
+Name[en]=Mobius Studio
+Exec=mobius-studio
+Icon=mobius-studio
+Terminal=false
+Categories=Graphics;AudioVideo;
+StartupWMClass=mobius-studio

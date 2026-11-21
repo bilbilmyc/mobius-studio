@@ -1,0 +1,52 @@
+[package]
+name = "mobius-studio"
+version = "2.3.0"
+edition = "2021"
+description = "莫比环本地图片与视频工作台"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "protocol-asset", "common-controls-v6", "x11", "dbus"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "multipart"] }
+tokio = { version = "1", features = ["fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+image = { version="0.25", default-features=false, features= ["png", "jpeg", "webp", "gif"] }
+base64 = "0.22"
+tempfile = "3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+url = "2"
+rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = {version = "0.61",features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+axum = {version="0.8",default-features=false,features= ["http1", "tokio"] }
+tower-http = {version="0.6",features= ["fs"] }
+tower = {version="0.5",features= ["util"] }
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+
+[features]
+installed = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 8

@@ -1,0 +1,213 @@
+[
+  {
+    "Key": "rh-gpt-image2-t2i-20261009",
+    "Name": "GPT Image 2 · 文生图",
+    "Video": false,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": false,
+    "Rate": 0.1,
+    "FastRate": 0.1,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"1k","Options":[{"Label":"1K","Value":"1k","Factor":1},{"Label":"2K","Value":"2k","Factor":1.4},{"Label":"4K","Value":"4k","Factor":2.2}]},
+      {"Key":"aspect","Label":"画幅","Type":"select","Default":"9:16","Options":[{"Label":"1:1","Value":"1:1","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1},{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"auto","Value":"auto","Factor":1}]}
+    ],
+    "Slots": []
+  },
+  {
+    "Key": "rh-gpt-image2-i2i-20261009",
+    "Name": "GPT Image 2 · 图生图",
+    "Video": false,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": false,
+    "Rate": 0.1,
+    "FastRate": 0.1,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"1k","Options":[{"Label":"1K","Value":"1k","Factor":1},{"Label":"2K","Value":"2k","Factor":1.4},{"Label":"4K","Value":"4k","Factor":2.2}]},
+      {"Key":"aspect","Label":"画幅","Type":"select","Default":"9:16","Options":[{"Label":"1:1","Value":"1:1","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1},{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"auto","Value":"auto","Factor":1}]}
+    ],
+    "Slots": [{"Kind":"image","Min":1,"Max":9,"Label":"参考图片"}]
+  },
+  {
+    "Key": "rh-banana-21-20261009",
+    "Name": "Banana 2.1 · 生成与编辑",
+    "Video": false,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": false,
+    "Rate": 0.14,
+    "FastRate": 0.14,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"1k","Options":[{"Label":"1K","Value":"1k","Factor":1},{"Label":"2K","Value":"2k","Factor":1},{"Label":"4K","Value":"4k","Factor":1}]},
+      {"Key":"aspect","Label":"画幅","Type":"select","Default":"9:16","Options":[{"Label":"1:1","Value":"1:1","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1},{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"4:3","Value":"4:3","Factor":1},{"Label":"3:4","Value":"3:4","Factor":1}]}
+    ],
+    "Slots": [{"Kind":"image","Min":0,"Max":14,"Label":"参考图片"}]
+  },
+  {
+    "Key": "rh-minimax-h3-t2v-20261009",
+    "Name": "MiniMax H3 · 文生视频",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的视频内容：画面、镜头运动、主体动作、台词、音效与配乐..."},
+    "Hint": "无需上传图片，纯文本生成画面与原生音频，支持 5-15 秒、480p/768p",
+    "PerSecond": true,
+    "Rate": 0.02,
+    "FastRate": 0.04,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"duration","Label":"时长（秒）","Type":"number","Default":5,"Min":5,"Max":15,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"768p","Value":"768p","Factor":2}]},
+      {"Key":"aspect","Label":"画面比例","Type":"select","Default":"9:16","Options":[{"Label":"方形 1:1","Value":"1:1","Factor":1},{"Label":"竖版照片 2:3","Value":"2:3","Factor":1},{"Label":"横版照片 3:2","Value":"3:2","Factor":1},{"Label":"竖版标准 3:4","Value":"3:4","Factor":1},{"Label":"横版标准 4:3","Value":"4:3","Factor":1},{"Label":"竖屏 9:16","Value":"9:16","Factor":1},{"Label":"横屏 16:9","Value":"16:9","Factor":1},{"Label":"超宽屏 21:9","Value":"21:9","Factor":1}]},
+      {"Key":"mode","Label":"模式","Type":"select","Default":"t2v","Options":[{"Label":"文生视频","Value":"t2v","Factor":1}]}
+    ],
+    "Slots": []
+  },
+  {
+    "Key": "rh-minimax-h3-ref-20261009",
+    "Name": "MiniMax H3 · 参考生视频",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的视频内容；可用 <图片1>、<音频1> 指代参考素材顺序..."},
+    "Hint": "支持 1-9 张参考图片、可选 0-3 个参考音频，5-15 秒，480p/768p",
+    "PerSecond": true,
+    "Rate": 0.02,
+    "FastRate": 0.04,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"duration","Label":"时长（秒）","Type":"number","Default":5,"Min":5,"Max":15,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"768p","Value":"768p","Factor":2}]},
+      {"Key":"aspect","Label":"画面比例","Type":"select","Default":"9:16","Options":[{"Label":"方形 1:1","Value":"1:1","Factor":1},{"Label":"竖版照片 2:3","Value":"2:3","Factor":1},{"Label":"横版照片 3:2","Value":"3:2","Factor":1},{"Label":"竖版标准 3:4","Value":"3:4","Factor":1},{"Label":"横版标准 4:3","Value":"4:3","Factor":1},{"Label":"竖屏 9:16","Value":"9:16","Factor":1},{"Label":"横屏 16:9","Value":"16:9","Factor":1},{"Label":"超宽屏 21:9","Value":"21:9","Factor":1}]},
+      {"Key":"mode","Label":"模式","Type":"select","Default":"reference","Options":[{"Label":"多模态参考","Value":"reference","Factor":1}]}
+    ],
+    "Slots": [{"Kind":"image","Min":1,"Max":9,"Label":"参考图片"},{"Kind":"audio","Min":0,"Max":3,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-sd25-20260907",
+    "Name": "Seedance 2.5 · 参考生视频",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想参考素材生成的内容..."},
+    "Hint": "至少上传一个参考素材；参考音频和参考视频各自总时长不超过30秒。",
+    "PerSecond": true,
+    "Rate": 0.67,
+    "FastRate": 0.67,
+    "AnyReference": true,
+    "Fields": [
+      {"Key":"duration","Label":"时长 (秒)","Type":"number","Default":5,"Min":4,"Max":30,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"720p","Value":"720p","Factor":2.25}]},
+      {"Key":"ratio","Label":"视频比例","Type":"select","Default":"9:16","Options":[{"Label":"自适应","Value":"adaptive","Factor":1},{"Label":"21:9","Value":"21:9","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1},{"Label":"4:3","Value":"4:3","Factor":1},{"Label":"1:1","Value":"1:1","Factor":1},{"Label":"3:4","Value":"3:4","Factor":1},{"Label":"9:16","Value":"9:16","Factor":1}]},
+      {"Key":"watermark","Label":"添加水印","Type":"boolean","Default":false},
+      {"Key":"generate_audio","Label":"生成音频","Type":"boolean","Default":true}
+    ],
+    "Slots": [{"Kind":"image","Min":0,"Max":30,"Label":"参考图片"},{"Kind":"audio","Min":0,"Max":10,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-seedance-2-5-flash-20261116",
+    "Name": "Seedance 2.5 Flash",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": true,
+    "Rate": 0.44,
+    "FastRate": 0.44,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"mode","Label":"生成模式","Type":"select","Default":"reference","Options":[{"Label":"多模态参考生","Value":"reference","Factor":1},{"Label":"文生视频","Value":"t2v","Factor":1},{"Label":"首帧图生视频","Value":"first_frame","Factor":1},{"Label":"首尾帧过渡","Value":"first_last","Factor":1}]},
+      {"Key":"duration","Label":"时长 (秒)","Type":"number","Default":5,"Min":4,"Max":30,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"720p","Value":"720p","Factor":2.25}]},
+      {"Key":"ratio","Label":"视频比例","Type":"select","Default":"9:16","Options":[{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1}]},
+      {"Key":"watermark","Label":"添加水印","Type":"boolean","Default":false},
+      {"Key":"generate_audio","Label":"生成音频","Type":"boolean","Default":true}
+    ],
+    "Slots": [{"Kind":"image","Min":0,"Max":10,"Label":"参考图片"},{"Kind":"video","Min":0,"Max":5,"Label":"参考视频"},{"Kind":"audio","Min":0,"Max":5,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-sd20-20260907",
+    "Name": "Seedance 2.0",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": true,
+    "Rate": 0.46,
+    "FastRate": 0.46,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"mode","Label":"生成模式","Type":"select","Default":"reference","Options":[{"Label":"多模态参考生","Value":"reference","Factor":1},{"Label":"文生视频","Value":"t2v","Factor":1},{"Label":"首帧图生视频","Value":"first_frame","Factor":1},{"Label":"首尾帧过渡","Value":"first_last","Factor":1}]},
+      {"Key":"duration","Label":"时长 (秒)","Type":"number","Default":5,"Min":4,"Max":15,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"720p","Value":"720p","Factor":2.15}]},
+      {"Key":"ratio","Label":"视频比例","Type":"select","Default":"9:16","Options":[{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1}]},
+      {"Key":"watermark","Label":"添加水印","Type":"boolean","Default":false},
+      {"Key":"generate_audio","Label":"生成音频","Type":"boolean","Default":true}
+    ],
+    "Slots": [{"Kind":"image","Min":0,"Max":9,"Label":"参考图片"},{"Kind":"video","Min":0,"Max":1,"Label":"参考视频"},{"Kind":"audio","Min":0,"Max":9,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-sd20-fast-20260907",
+    "Name": "Seedance 2.0 Fast",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": true,
+    "Rate": 0.37,
+    "FastRate": 0.37,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"mode","Label":"生成模式","Type":"select","Default":"reference","Options":[{"Label":"多模态参考生","Value":"reference","Factor":1},{"Label":"文生视频","Value":"t2v","Factor":1},{"Label":"首帧图生视频","Value":"first_frame","Factor":1},{"Label":"首尾帧过渡","Value":"first_last","Factor":1}]},
+      {"Key":"duration","Label":"时长 (秒)","Type":"number","Default":5,"Min":4,"Max":15,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"720p","Value":"720p","Factor":2.16}]},
+      {"Key":"ratio","Label":"视频比例","Type":"select","Default":"9:16","Options":[{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1}]},
+      {"Key":"watermark","Label":"添加水印","Type":"boolean","Default":false},
+      {"Key":"generate_audio","Label":"生成音频","Type":"boolean","Default":true}
+    ],
+    "Slots": [{"Kind":"image","Min":0,"Max":9,"Label":"参考图片"},{"Kind":"video","Min":0,"Max":1,"Label":"参考视频"},{"Kind":"audio","Min":0,"Max":3,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-sd20-mini-20260907",
+    "Name": "Seedance 2.0 Mini",
+    "Video": true,
+    "Text": {"Required":true,"Hint":"描述你想生成的内容..."},
+    "Hint": "",
+    "PerSecond": true,
+    "Rate": 0.23,
+    "FastRate": 0.23,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"mode","Label":"生成模式","Type":"select","Default":"reference","Options":[{"Label":"多模态参考生","Value":"reference","Factor":1},{"Label":"文生视频","Value":"t2v","Factor":1},{"Label":"首帧图生视频","Value":"first_frame","Factor":1},{"Label":"首尾帧过渡","Value":"first_last","Factor":1}]},
+      {"Key":"duration","Label":"时长 (秒)","Type":"number","Default":5,"Min":4,"Max":15,"Step":1},
+      {"Key":"resolution","Label":"分辨率","Type":"select","Default":"480p","Options":[{"Label":"480p","Value":"480p","Factor":1},{"Label":"720p","Value":"720p","Factor":2.17}]},
+      {"Key":"ratio","Label":"视频比例","Type":"select","Default":"9:16","Options":[{"Label":"9:16","Value":"9:16","Factor":1},{"Label":"16:9","Value":"16:9","Factor":1}]},
+      {"Key":"watermark","Label":"添加水印","Type":"boolean","Default":false},
+      {"Key":"generate_audio","Label":"生成音频","Type":"boolean","Default":true}
+    ],
+    "Slots": [{"Kind":"image","Min":1,"Max":9,"Label":"参考图片"},{"Kind":"video","Min":0,"Max":1,"Label":"参考视频"},{"Kind":"audio","Min":0,"Max":3,"Label":"参考音频"}]
+  },
+  {
+    "Key": "rh-video-upscale-20260907",
+    "Name": "视频超分",
+    "Video": true,
+    "Text": null,
+    "Hint": "",
+    "PerSecond": true,
+    "Rate": 0.04,
+    "FastRate": 0.08,
+    "AnyReference": false,
+    "Fields": [
+      {"Key":"resolution","Label":"输出分辨率","Type":"select","Default":"720p","Options":[{"Label":"720p","Value":"720p","Factor":1},{"Label":"1080p","Value":"1080p","Factor":1.5},{"Label":"2K","Value":"2k","Factor":2},{"Label":"4K","Value":"4k","Factor":2.5}]}
+    ],
+    "Slots": [{"Kind":"video","Min":1,"Max":1,"Label":"待处理视频"}]
+  },
+  {
+    "Key": "rh-erase-video-subtitle-pro-20260907",
+    "Name": "视频去字幕",
+    "Video": true,
+    "Text": null,
+    "Hint": "上传 1 个视频；按输入视频真实时长计费，每秒 0.1 元。",
+    "PerSecond": true,
+    "Rate": 0.1,
+    "FastRate": 0.1,
+    "AnyReference": false,
+    "Fields": [],
+    "Slots": [{"Kind":"video","Min":1,"Max":1,"Label":"待处理视频"}]
+  }
+]

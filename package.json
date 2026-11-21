@@ -1,0 +1,32 @@
+{
+  "name": "mobius-studio",
+  "productName": "莫比环",
+  "version": "2.3.0",
+  "description": "本地图片与视频创作工作台",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "start": "tauri dev",
+    "test": "npm run typecheck && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:desktop": "node tests/desktop-ui.mjs",
+    "package": "node scripts/package.mjs",
+    "installer": "node scripts/package.mjs --installer"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.6",
+    "@types/node": "^24.0.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "playwright-core": "1.65.1",
+    "typescript": "~5.9.3",
+    "vite": "8.3.8"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "productName": "mobius-studio",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "section": "graphics",
+        "desktopTemplate": "linux/mobius-studio.desktop",
+        "depends": ["libxdo3"],
+        "recommends": ["libsecret-tools", "gstreamer1.0-plugins-good", "gstreamer1.0-plugins-bad", "gstreamer1.0-libav"]
+      }
+    }
+  }
+}

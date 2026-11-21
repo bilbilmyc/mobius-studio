@@ -1,0 +1,104 @@
+import { useEffect, useState } from 'react'
+import type { Integrations, MediaKind, Scene, Script } from '../shared'
+import { Modal } from './Editor'
+
+const sceneFields = {
+  heading: '场景', action: '画面与动作', dialogue: '台词或旁白', imagePrompt: '图片提示词', videoPrompt: '视频提示词',
+} satisfies Record<keyof Scene, string>
+
+interface Props {
+  active: boolean
+  writer?: Integrations['writer']
+  configure: () => void
+  usePrompt: (kind: MediaKind, prompt: string) => void
+}
+
+export function ScriptDesk({ active, writer, configure, usePrompt }: Props) {
+  const [scripts, setScripts] = useState<Script[]>([]), [selected, select] = useState('')
+  const [brief, setBrief] = useState(''), [count, setCount] = useState(4)
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const [editing, edit] = useState<Script | null>(null)
+  const script = scripts.find(s => s.id === selected)
+  useEffect(() => {
+    let current = true
+    window.studio.scripts().then(all => {
+      if (current) { setScripts(all); select(all[0]?.id ?? '') }
+    }).catch(e => { if (current) setError(String(e)) })
+    return () => { current = false }
+  }, [])
+  function remember(saved: Script) {
+    setScripts(all => [saved, ...all.filter(s => s.id !== saved.id)].sort((a, b) => b.created - a.created))
+    select(saved.id)
+  }
+  async function generate() {
+    if (!writer?.hasKey) { configure(); return }
+    setError(''); setBusy(true)
+    try { remember(await window.studio.generateScript(brief, count)) }
+    catch (e) { setError(String(e)) }
+    finally { setBusy(false) }
+  }
+  return <section className="script-desk page-body" hidden={!active} aria-label="剧本工作台">
+    <aside className="writing-sidebar">
+      <form className="writing-form" onSubmit={e => { e.preventDefault(); void generate() }}>
+        <h2>新建剧本</h2>
+        <label>故事构想<textarea rows={5} maxLength={12000} required={!!writer?.hasKey} value={brief}
+          placeholder="主角是谁？故事在哪里发生？你想让观众记住什么？" onChange={e => setBrief(e.target.value)} /></label>
+        <label>分镜数量<select value={count} onChange={e => setCount(+e.target.value)}>
+          {[1, 2, 3, 4, 6, 8, 12].map(n => <option key={n} value={n}>{n} 个分镜</option>)}</select></label>
+        <button className="primary" disabled={busy || !writer}>{busy ? '正在编写分镜…' : writer?.hasKey ? '生成剧本' : '配置剧本模型'}</button>
+        {writer && <small>{writer.model}</small>}
+      </form>
+      <div className="script-history"><h2>我的剧本</h2>
+        {scripts.map(s => <button key={s.id} aria-current={s.id === selected ? 'true' : undefined} onClick={() => select(s.id)}>
+          <b>{s.title}</b><small>{s.scenes.length} 镜 · {new Date(s.created).toLocaleDateString()}</small></button>)}
+        {!scripts.length && <p>生成后会自动保存到这里。</p>}
+      </div>
+    </aside>
+    <div className="manuscript">
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {busy && <p role="status" className="writing-progress">模型正在编写 {count} 个分镜，可切换到创作台继续工作。</p>}
+      {script ? <>
+        <div className="manuscript-title"><div><small>{script.scenes.length} 个分镜 · {script.model}</small>
+          <h2>{script.title}</h2></div><button onClick={() => edit(script)}>编辑剧本</button></div>
+        <p className="story-brief">{script.brief}</p>
+        <ol className="shot-list">
+          {script.scenes.map((scene, index) => <li key={index}>
+            <span className="shot-number" aria-label={`分镜 ${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
+            <article><h3>{scene.heading}</h3><p>{scene.action}</p>
+              {scene.dialogue && <blockquote>{scene.dialogue}</blockquote>}
+              <details><summary>分镜提示词</summary><dl><dt>图片</dt><dd>{scene.imagePrompt}</dd><dt>视频</dt><dd>{scene.videoPrompt}</dd></dl></details>
+              <div className="shot-actions">
+                <button onClick={() => usePrompt('image', scene.imagePrompt)}>用于生图</button>
+                <button onClick={() => usePrompt('video', scene.videoPrompt)}>用于视频</button>
+              </div>
+            </article>
+          </li>)}
+        </ol>
+      </> : !busy && <div className="script-empty"><h2>写下你的第一个分镜</h2><p>从故事构想开始，生成场景、动作、台词，以及每个镜头的图片和视频提示词。</p></div>}
+    </div>
+    {editing && <ScriptEditor initial={editing} close={() => edit(null)} saved={s => { remember(s); edit(null) }} />}
+  </section>
+}
+
+function ScriptEditor({ initial, close, saved }: { initial: Script; close: () => void; saved: (s: Script) => void }) {
+  const [title, setTitle] = useState(initial.title), [scenes, setScenes] = useState(initial.scenes)
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  return <Modal wide title="编辑剧本" close={() => { if (!busy) close() }}>
+    <form onSubmit={async e => {
+      e.preventDefault(); setBusy(true); setError('')
+      try { saved(await window.studio.editScript(initial.id, { title, scenes })) }
+      catch (e) { setError(String(e)); setBusy(false) }
+    }}>
+      <div className="dialog-body fields"><label>剧本标题<input required maxLength={200} value={title} onChange={e => setTitle(e.target.value)} /></label>
+        {scenes.map((scene, index) => <fieldset key={index}><legend>分镜 {index + 1}</legend>
+          {(Object.keys(sceneFields) as (keyof Scene)[]).map(k =>
+            <label key={k}>{sceneFields[k]}<textarea rows={k === 'heading' ? 1 : 2} required={k !== 'dialogue'} maxLength={12000}
+              value={scene[k]} onChange={e => setScenes(all => all.map((s, i) => i === index ? { ...s, [k]: e.target.value } : s))} /></label>)}
+        </fieldset>)}
+      </div>
+      {error && <p role="alert" className="error">{error}</p>}
+      <footer className="modal-actions"><button type="button" disabled={busy} onClick={close}>取消</button>
+        <button className="primary" disabled={busy}>保存剧本</button></footer>
+    </form>
+  </Modal>
+}

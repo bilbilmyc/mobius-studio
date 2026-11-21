@@ -1,0 +1,10 @@
+dist/
+__pycache__/
+node_modules/
+.app-build/
+test-results/
+target/
+src-tauri/gen/
+Data/
+.env
+.env.*
