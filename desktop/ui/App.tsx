@@ -44,6 +44,12 @@ import { OutputSpecs, type MediaMetadata } from './MediaDelivery'
 import { requestedAudio } from './outputSpecs'
 import { ParameterField } from './ProtocolSettings'
 import { ConnectionEditor } from './ConnectionEditor'
+import { draftSubmission } from './draftSubmission'
+import { TaskAccounting } from './TaskAccounting'
+import { ModelFeatures, useFeatures } from './ModelFeatures'
+import { MaskEditor } from './MaskEditor'
+import { CandidateGallery } from './CandidateGallery'
+import { ReferenceCards } from './ReferenceCards'
 import { Assets, addAssets, frameOrder } from './Assets'
 import { Settings, type SettingsSection } from './Settings'
 import { ScriptDesk } from './ScriptDesk'
@@ -51,6 +57,7 @@ import { CloudSave } from './CloudSave'
 import { JobPreviewState } from './JobPreviewState'
 import { BackgroundTasks, jobAction } from './BackgroundTasks'
 import { WorkLibrary, defaultLibraryView } from './WorkLibrary'
+import { ComfyWorkflow } from './ComfyWorkflow'
 import { ComfyControls } from './ComfyControls'
 import { useStudioState } from './useStudioState'
 import { useShotDrafts } from './useShotDrafts'
@@ -167,12 +174,13 @@ function App() {
   const id = profile?.Id ?? '@site',
     proto = profile?.ProtocolId ?? (kind === 'image' ? 'rh-image' : 'rh-video'),
     native = isSite(proto)
+  const featureRecord=useFeatures(!native?profile?.Id:undefined,selectedModel), features=featureRecord.e?.declared
   const currentTemplate =
       siteTemplate(composer.templates[id] ?? '') ?? defaultTemplate(kind),
     preset = presets[proto],
     controls = profile?.Controls,
     sizes =
-      profile?.Relay?.sizes ??
+      features?.sizes.length ? features.sizes : profile?.Relay?.sizes ??
       (controls?.sizes?.length ? controls.sizes : preset.sizes),
     seconds =
       profile?.Relay?.seconds ??
@@ -229,7 +237,7 @@ function App() {
   )
   const assets = draft.byMode[mode] ?? [],
     setAssets = (v: Picked[]) =>
-      update({ byMode: { ...draft.byMode, [mode]: v } })
+      update({ byMode: { ...draft.byMode, [mode]: v }, ...(v[0]?.token!==assets[0]?.token?{mask:undefined,sourceJob:undefined}:{}) })
   const frameMode = mode === 'default' ? draft.intent : mode
   const firstFrame = kind === 'video' && (frameMode === 'first_frame' || frameMode === 'first_last') ? frameOrder(assets)[0] : undefined
   const previewFrame = firstFrame?.role === 'last_frame' ? undefined : firstFrame
@@ -260,16 +268,16 @@ function App() {
       )
     : relaySlots(
         mode,
-        preset.maxImages ?? 1,
+        features?.maxImages ?? preset.maxImages ?? 1,
         profile?.Relay?.workflows?.[mode]?.body,
       )
   const mappedBody =
     profile?.Relay?.workflows?.[mode]?.body ?? profile?.Relay?.body
   const uses = (...keys: string[]) =>
     !mappedBody || keys.some((k) => mappedBody.includes('{{' + k + '}}'))
-  const showSize =
-    uses('size', 'width', 'height') ||
-    (!controls?.ratios?.length && uses('ratio'))
+  const [graphKey,setGraphKey]=useState('')
+  const customGraph=proto==='comfy-image'&&graphKey===dk
+  const showSize = !customGraph && (uses('size','width','height') || (!controls?.ratios?.length && uses('ratio')))
   const paired = mode === 'first_last'
   const fixedRatio =
     !native &&
@@ -312,9 +320,18 @@ function App() {
   const recentIssue = recent && ['failed', 'uncertain', 'paused'].includes(recent.status) ? taskGuidance(recent, Date.now()) : undefined
   const comparisons = data?.comparisons ?? []
   const pictureOptions = kind === 'image' ? comparisonOptions(externals, official, id,
-    native ? currentTemplate.Key : selectedModel!, intent, assets, draft) : []
+    native ? currentTemplate.Key : selectedModel!, intent, assets, draft, data?.modelFeatures) : []
   const peer = pictureOptions.find(option => option.key === composer.compare)
-  const mediaAction = peer ? '用两个模型生成' : kind === 'video' ? '生成视频' : '生成图片'
+  const count=kind==='image'&&!peer?draft.count??1:1
+  const nativeMulti=count>1 && ['openai-image','wan-image'].includes(proto) && (features?.multi??1)>=count
+  const mask=mode==='i2i'?draft.mask:undefined
+  const mismatches=[
+    features?.sizes.length&&!features.sizes.includes(draft.size)?'尺寸 '+draft.size+' 不适用于此模型。':'',
+    features?.maxImages!=null&&assets.filter(a=>a.kind==='image').length>features.maxImages?'参考图超过此模型上限，请移除多余图片。':'',
+    features?.firstLast===false&&mode==='first_last'?'此模型不支持首尾帧，请调整创作方式。':'',
+    mask&&(!features?.mask||proto!=='openai-image'||peer)?'此遮罩仅适用于已声明支持的单模型图片编辑，请调整模型或移除遮罩。':'',
+  ].filter(Boolean)
+  const mediaAction = count>1?'生成 '+count+' 张候选':peer ? '用两个模型生成' : kind === 'video' ? '生成视频' : '生成图片'
   const generationMode = hasPrompt ? composer.generationOptimization : undefined
   const references = promptReferences(kind, intent, assets)
   const review = generationReview?.scope === promptScope && page === 'create' && hasPrompt ? generationReview : null
@@ -428,7 +445,7 @@ function App() {
         seconds: draft.seconds,
         config: draft.config,
         priority: draft.priority,
-        assets: paired ? frameOrder(assets) : assets,
+        ...draftSubmission(draft,mode,paired ? frameOrder(assets) : assets,count,proto,features?.multi),
       }
       const group = peer ? await window.studio.startComparison([input, peerInput(input, peer)]) : undefined
       const next = group ? group.jobIds[0] : await window.studio.start(input)
@@ -534,7 +551,7 @@ function App() {
       templates: t ? { ...old.templates, [next]: t.Key } : old.templates,
       models: p && !t ? { ...old.models, [p.Id]: j.model } : old.models,
       variants: { ...old.variants, [key]: {
-        config: conf,
+        config: conf, mask:record.mask, sourceJob:j.sourceJob,
         intent: restoredIntent,
         priority: j.site?.priority ?? 0,
         size: j.size,
@@ -548,10 +565,10 @@ function App() {
     pageTo('create')
     say('已恢复提示词、所选参数和素材顺序。')
   }
-  async function continueWithImage(j: JobView, destination: MediaKind, motion?: string) {
+  async function continueWithImage(j: JobView, destination: MediaKind, motion?: string, picked?: Picked, targetShot?: ShotLink) {
     const wanted = destination === 'image' ? 'i2i' : 'first_frame'
     const candidates = externals.filter(p => mediaKind(p.ProtocolId) === destination)
-    const sourceShot = j.shot ?? undefined
+    const sourceShot = targetShot ?? j.shot ?? undefined
     const target = workspace.get(destination, sourceShot)
     let p = candidates.find(p => p.Id === target.service)
     function imageMode(connection?: ProfileView) {
@@ -578,7 +595,7 @@ function App() {
           ? templates.find((t) => t.Key.startsWith('rh-sd20-mini-'))
           : templates.find((t) => officialModes(t).includes(wanted))
       : undefined
-    const a = await window.studio.frame(j.id)
+    const a = picked ?? await window.studio.frame(j.id)
     const key = JSON.stringify([
       p?.Id ?? '@site',
       destination,
@@ -605,7 +622,7 @@ function App() {
       ...current, service: next, prompt: motion ?? current.prompt, compare: '',
       templates: t ? { ...current.templates, [next]: t.Key } : current.templates,
       variants: { ...current.variants, [key]: {
-        ...old,
+        ...old, sourceJob:j.id, mask:undefined,
         config: cfg,
         priority: old?.priority ?? 0,
         intent: actual,
@@ -701,7 +718,8 @@ function App() {
         </header>
         {openedScripts && <ScriptDesk active={page === 'script'} writer={integrations?.writer}
           configure={() => settingsPage('writer')} usePrompt={shotPrompt} jobs={data?.jobs ?? []} inspect={inspect}
-          useFrame={(image, motion) => continueWithImage(image, 'video', motion)}
+          useFrame={(image, motion, picked, target) => continueWithImage(image, 'video', motion, picked, target)}
+          imported={async()=>{await workspace.reload();await refresh()}}
           revision={scriptRevision} comparisons={comparisons} compare={compare}
           beforeEdit={workspace.flush} edited={workspace.syncScript} />}
         {page === 'create' ? (
@@ -800,6 +818,9 @@ function App() {
                         .join('　·　')
                     : frameUrl ? '填写镜头运动或画面变化，确认参数后即可生成视频。' : example[kind]}
                 </p>
+                {!!job?.candidateIds?.length&&<CandidateGallery ids={job.candidateIds} jobs={jobs} inspect={inspect}/>}
+                {job&&<TaskAccounting key={job.id} job={job}/>}
+                {job?.sourceJob&&<small>素材来源 · {job.sourceJob}</small>}
                 {job?.file && <OutputSpecs key={job.id} job={job} metadata={metadata?.id === job.id ? metadata : undefined} />}
                 {job && (
                   <CloudSave job={job} settings={integrations} configure={() => settingsPage('storage')} report={say} />
@@ -939,7 +960,9 @@ function App() {
                     生成模型
                     <select aria-label="生成模型" value={staleModel ? composer.models[profile.Id] : selectedModel} onChange={(e) => {
                       const value = e.target.value
-                      change(old => ({ ...old, compare: '', models: { ...old.models, [id]: value } }))
+                      const nextKey=JSON.stringify([id,kind,profile.BaseUrl,value])
+                      change(old => ({ ...old, compare: '', models: { ...old.models, [id]: value },
+                        variants:{...old.variants,[nextKey]:old.variants[nextKey]??{...draft}} }))
                       show('')
                     }}>
                       {staleModel && <option disabled value={composer.models[profile.Id]}>原模型已移除，请重新选择</option>}
@@ -953,6 +976,8 @@ function App() {
                     {selectedModel} · {preset.title}
                   </small>
                 )}
+                {profile&&!native&&selectedModel&&<ModelFeatures key={dk} profileId={id} model={selectedModel} record={featureRecord} saved={refresh}/>}
+                {mismatches.map(m=><p role="alert" key={m}>{m}</p>)}
                 {shot ? <div className="bound-shot"><span>{shot.label}</span>
                   <small role="status">{workspace.status}</small>
                   {composer.scriptPrompt && composer.scriptPrompt !== prompt &&
@@ -1184,6 +1209,13 @@ function App() {
                         }
                       />
                     ))}
+                {fileSlots.some(slot => slot.Kind === 'image') && <ReferenceCards items={assets} apply={(references, description) => {
+                  const slot = fileSlots.find(s => s.Kind === 'image')!
+                  if (references.length > slot.Max) throw Error('这张卡片的参考图数量超过当前模型上限。')
+                  const images = references.map((p,i) => ({...p, role: paired ? (i ? 'last_frame' : 'first_frame') : undefined}))
+                  setAssets([...assets.filter(a => a.kind !== 'image'), ...images])
+                  if (description) text([prompt, description].filter(Boolean).join('\n'))
+                }} />}
                 {fileSlots.map((slot) => (
                   <Assets
                     key={[shot?.scriptId, shot?.sceneId, dk, mode, slot.Kind].join('/')}
@@ -1198,7 +1230,12 @@ function App() {
                     report={say}
                   />
                 ))}
-                {proto === 'comfy-image' && <ComfyControls config={draft.config} imageInput={mode === 'i2i'}
+                {profile&&proto==='comfy-image'&&<ComfyWorkflow key={dk} profileId={id} model={selectedModel!} changed={enabled=>setGraphKey(enabled?dk:'')}/>}
+                {proto==='openai-image'&&mode==='i2i'&&assets[0]&&(features?.mask||draft.mask)&&<MaskEditor image={assets[0]} mask={draft.mask} save={m=>update({mask:m})}/>}
+                {kind==='image'&&!peer&&<label>同模型候选数<select value={count} onChange={e=>update({count:Number(e.target.value)})}>{[1,2,4].map(n=><option key={n} value={n}>{n} 张</option>)}</select></label>}
+                {count>1&&<p>{nativeMulti?'1 次生成请求，服务商返回多张结果':count+' 次独立生成请求'} · {native?'合计预估 ¥'+(count*Number(quote(currentTemplate,draft.config,draft.priority).split('¥')[1])).toFixed(2):'费用由连接的服务决定'}</p>}
+                {customGraph&&<small>尺寸、采样与种子由已导入的工作流决定。</small>}
+                {proto === 'comfy-image' && !customGraph && <ComfyControls config={draft.config} imageInput={mode === 'i2i'}
                   change={updateConfig} />}
                 {kind === 'image' && <label>对比模型
                   <select aria-label="对比模型" value={composer.compare} onChange={e => {
@@ -1257,7 +1294,7 @@ function App() {
                 </label>}
                 <button
                   className="primary generate"
-                  disabled={busy || !data || staleService || staleModel || (kind === 'image' && !!composer.compare && !peer)}
+                  disabled={busy || !data || mismatches.length>0 || staleService || staleModel || (kind === 'image' && !!composer.compare && !peer)}
                   onClick={e => { if (e.detail <= 1) void generate() }}
                 >
                   {busy

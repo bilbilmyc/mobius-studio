@@ -28,6 +28,8 @@ pub struct Studio {
     pub http: reqwest::Client,
     pub(crate) cloud_transfer: tokio::sync::Mutex<()>,
     active: Mutex<HashSet<String>>,
+    pub(crate) batch_gate: Mutex<()>,
+    pub(crate) has_batches: std::sync::atomic::AtomicBool,
     notify: Box<dyn Fn(Option<&str>) + Send + Sync>,
     pub poll: Duration,
 }
@@ -37,6 +39,8 @@ impl Studio {
         notify: impl Fn(Option<&str>) + Send + Sync + 'static,
     ) -> Result<Self> {
         Ok(Self {
+            has_batches: std::sync::atomic::AtomicBool::new(store.home.join("批次").is_dir()),
+            batch_gate: Default::default(),
             store,
             http: provider::client()?,
             cloud_transfer: Default::default(),
@@ -97,6 +101,26 @@ impl Studio {
         if site(&p.protocol_id) && key.is_empty() {
             return Err("请先连接此官网的 OpenAPI Key。".into());
         }
+        let features = self.store.features(&p, &p.model)?;
+        let mask = i
+            .mask
+            .map(|m| {
+                self.store
+                    .assets(&[m])
+                    .and_then(|mut a| a.pop().ok_or("遮罩素材已丢失。".into()))
+            })
+            .transpose()?;
+        let count = i.count.unwrap_or(1);
+        if ![1, 2, 4].contains(&count) {
+            return Err("候选数量仅支持 1、2、4。".into());
+        }
+        if site(&p.protocol_id) && (count != 1 || mask.is_some()) {
+            return Err("此官网模板每次接受一个结果，未提供遮罩。".into());
+        }
+        let source = i
+            .source_job
+            .map(|id| self.store.job(&id).map(|j| j.id))
+            .transpose()?;
         let assets = self.store.assets(&i.assets)?;
         let mut j = Job {
             shot: i
@@ -104,6 +128,8 @@ impl Studio {
                 .map(|link| self.store.resolve_shot(link))
                 .transpose()?,
             id: id(),
+            mask,
+            source_job: source,
             profile_id: p.id,
             profile_name: p.name,
             protocol_id: p.protocol_id,
@@ -144,8 +170,35 @@ impl Studio {
             j.site_options = Some(s);
         } else {
             j.settings = i.config;
+            j.settings.remove("comfyWorkflow");
             j.assets = assets;
-            crate::creation::prepare(&mut j, p.controls.as_ref(), &self.store)?;
+            if j.protocol_id == "comfy-image" {
+                crate::custom_graph::snapshot(&self.store, &mut j)?;
+            }
+            if count > 1 {
+                j.native_count = Some(count);
+                j.candidate_ids.push(j.id.clone());
+                j.candidate_ids.extend((1..count).map(|_| id()));
+            }
+            crate::model_features::check(features.as_ref(), &j)?;
+            let mut controls = p.controls.unwrap_or_default();
+            if let Some(f) = &features {
+                if !f.sizes.is_empty() {
+                    controls.sizes = f.sizes.clone();
+                    if let Some(r) = &mut j.relay {
+                        r.sizes = f.sizes.clone()
+                    }
+                }
+            }
+            crate::creation::prepare_with_limit(
+                &mut j,
+                Some(&controls),
+                &self.store,
+                features.as_ref().and_then(|f| f.max_images),
+            )?;
+            if let Some(mask) = &j.mask {
+                crate::masks::validate(&self.store, &j.assets, mask)?;
+            }
         }
         let prep = !j.assets.is_empty()
             || j.reference.is_some()
@@ -184,8 +237,19 @@ impl Studio {
             let outcome = s.run(&mut j, submit).await;
             // Publish the paused status and release ownership under the same lock as resume.
             let mut active = s.active.lock().unwrap();
-            if let Err(err) = outcome {
-                let status = if j.remote_id.is_some() || j.result_url.is_some() {
+            if s.store
+                .home
+                .join("远端撤回")
+                .join(format!("{}.json", j.id))
+                .is_file()
+                && j.status != "done"
+            {
+                let _ = s.update(&mut j, "cancelled", "服务端已受理针对该编号的取消。");
+            } else if let Err(err) = outcome {
+                let status = if j.remote_id.is_some()
+                    || j.result_url.is_some()
+                    || s.group_file(&j.id).is_file()
+                {
                     "paused"
                 } else if err.definite || j.status == "preparing" {
                     "failed"
@@ -195,6 +259,12 @@ impl Studio {
                 let _ = s.update(&mut j, status, &err.message);
             }
             active.remove(&j.id);
+            drop(active);
+            if s.has_batches.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Err(e) = s.dispatch() {
+                    eprintln!("批次调度失败：{e}");
+                }
+            }
         });
         Ok(())
     }
@@ -208,8 +278,18 @@ impl Studio {
         )
     }
     pub fn recover(self: &Arc<Self>) -> Result<()> {
+        crate::project_archive::recover(&self.store)?;
         self.store.recover_comparisons()?;
         for mut j in self.store.jobs()? {
+            if j.candidate_ids
+                .first()
+                .is_some_and(|parent| self.group_file(parent).is_file())
+            {
+                if j.candidate_ids.first() == Some(&j.id) {
+                    self.launch(j, false)?;
+                }
+                continue;
+            }
             if j.status == "done" {
                 if let Some(copy) = j
                     .cloud
@@ -262,7 +342,7 @@ impl Studio {
                 )?,
             }
         }
-        Ok(())
+        self.dispatch()
     }
     pub async fn run(&self, j: &mut Job, submit: bool) -> std::result::Result<(), Fault> {
         let key = if site(&j.protocol_id) && !submit {
@@ -270,6 +350,10 @@ impl Studio {
         } else {
             self.store.key(j)?
         };
+        if !submit && self.group_file(&j.id).is_file() {
+            let outputs = crate::store::read(&self.group_file(&j.id))?;
+            return self.finish_group(j, outputs, &key).await;
+        }
         if !submit {
             if let Some(url) = j.result_url.clone() {
                 match self.finish(j, Output::Url(url), &key).await {
@@ -335,6 +419,12 @@ impl Studio {
             for a in &j.assets {
                 inputs.push(crate::inputs::Input::from_asset(&self.store, a)?);
             }
+            if let Some(mask) = &mut j.mask {
+                mask.path = freeze_asset(&self.store.home, &self.store.input(&mask.path)?)?;
+                let mut input = crate::inputs::Input::from_asset(&self.store, mask)?;
+                input.kind = "mask".into();
+                inputs.push(input);
+            }
             if let Some(path) = &j.reference {
                 let p = self.store.input(path)?;
                 inputs.push(crate::inputs::Input::local(
@@ -358,11 +448,67 @@ impl Studio {
         } else {
             submitted.ok_or_else(|| Fault::known("缺少可恢复的任务编号或结果地址。"))?
         };
+        if let Output::Many(items) = result {
+            let path = self.group_file(&j.id);
+            fs::create_dir_all(path.parent().unwrap()).map_err(Fault::known)?;
+            crate::store::save(&path, &items)?;
+            return self.finish_group(j, items, &key).await;
+        }
         if let Output::Failed(msg) = result {
             self.update(j, "failed", &msg)?;
             return Ok(());
         }
         self.finish(j, result, &key).await
+    }
+    pub(crate) fn group_file(&self, id: &str) -> PathBuf {
+        self.store.home.join("候选回执").join(format!("{id}.json"))
+    }
+    async fn finish_group(
+        &self,
+        j: &mut Job,
+        items: Vec<Output>,
+        key: &str,
+    ) -> provider::Reply<()> {
+        let count = j.candidate_ids.len();
+        if items.is_empty() || items.len() > count {
+            return Err(Fault::known("服务商返回的候选数与请求不符，请核对记录。"));
+        }
+        let received = items.len();
+        j.received_count = Some(received);
+        for (idx, item) in items.into_iter().enumerate().rev() {
+            let id = j.candidate_ids[idx].clone();
+            let mut child = if idx == 0 {
+                j.clone()
+            } else {
+                self.store.job(&id).unwrap_or_else(|_| {
+                    let mut c = j.clone();
+                    c.id = id;
+                    c.remote_id = None;
+                    c.result_url = None;
+                    c.file_name = None;
+                    c
+                })
+            };
+            if child.status == "done" && self.store.media(&child).is_some() {
+                continue;
+            }
+            self.finish(&mut child, item, key).await?;
+            if idx == 0 {
+                *j = child;
+            }
+        }
+        if received < count {
+            for id in &j.candidate_ids[received..] {
+                let mut absent = j.clone();
+                absent.id = id.clone();
+                absent.remote_id = None;
+                absent.file_name = None;
+                absent.cloud = None;
+                self.update(&mut absent, "failed", "服务商未返回这张候选。")?;
+            }
+        }
+        fs::remove_file(self.group_file(&j.id)).map_err(Fault::known)?;
+        Ok(())
     }
     async fn poll_result(&self, j: &mut Job, key: &str) -> provider::Reply<Output> {
         const RETRIES: u32 = 3;
@@ -383,6 +529,15 @@ impl Studio {
                     }
                     tokio::time::sleep(Duration::from_millis(remaining.min(60_000) as u64)).await;
                 }
+            }
+            if self
+                .store
+                .home
+                .join("远端撤回")
+                .join(format!("{}.json", j.id))
+                .is_file()
+            {
+                return Err(Fault::known("服务端已受理取消。"));
             }
             match provider::query(&self.http, j, key).await {
                 Ok(Output::Pending(detail)) => {
@@ -494,12 +649,21 @@ async fn keep(home: PathBuf, path: PathBuf, folder: &'static str) -> Result<Stri
 }
 
 pub(crate) fn keep_asset(home: &Path, path: &Path, folder: &str) -> Result<String> {
+    keep_checked(home, path, folder, false)
+}
+pub(crate) fn freeze_asset(home: &Path, path: &Path) -> Result<String> {
+    keep_checked(home, path, "参考素材", true)
+}
+fn keep_checked(home: &Path, path: &Path, folder: &str, snapshot: bool) -> Result<String> {
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     if mime(&path).is_none() {
         return Err("素材文件类型无效".into());
     }
     if let Ok(rel) = path.strip_prefix(home) {
-        if rel.components().count() == 2 && (rel.starts_with("作品") || rel.starts_with(folder)) {
+        if !snapshot
+            && rel.components().count() == 2
+            && (rel.starts_with("作品") || rel.starts_with(folder))
+        {
             return Ok(rel.to_string_lossy().replace('\\', "/"));
         }
     }

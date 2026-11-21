@@ -135,6 +135,7 @@ export async function exerciseComfy({ page, base, done, shot, fixture }) {
         ),
       mode,
     )
+    assert.ok(j, 'Expected ComfyUI mode '+mode+'; persisted '+JSON.stringify(await page.evaluate(async()=>(await window.studio.state()).jobs.filter(j=>j.protocol==='comfy-image').map(j=>({mode:j.settings?.mode,prompt:j.prompt,status:j.status})))) )
     assert.equal((await done(j.id)).file, true)
   }
   fixture.check()

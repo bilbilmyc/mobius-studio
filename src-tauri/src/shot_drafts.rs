@@ -19,10 +19,10 @@ pub struct ShotDraft {
 }
 
 #[derive(Serialize, Deserialize)]
-struct StoredDraft {
+pub(crate) struct StoredDraft {
     #[serde(flatten)]
-    draft: ShotDraft,
-    inputs: HashMap<String, Asset>,
+    pub(crate) draft: ShotDraft,
+    pub(crate) inputs: HashMap<String, Asset>,
 }
 
 impl Store {

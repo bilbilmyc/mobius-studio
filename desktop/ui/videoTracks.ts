@@ -92,3 +92,10 @@ export async function exportSilentVideo(id: string) {
     if (!closed) await invoke('close_video_io', { token: opened.token, format: null })
   }
 }
+
+export async function measuredDuration(id: string) {
+  const opened = await invoke<VideoFile>('open_video_io', {jobId:id,writing:false})
+  const input=inputFor(opened)
+  try { const seconds=await input.computeDuration(); if(!Number.isFinite(seconds)||seconds<=0) throw Error('无法读取视频实际时长。');return seconds }
+  finally {input.dispose();await invoke('close_video_io',{token:opened.token,format:null})}
+}

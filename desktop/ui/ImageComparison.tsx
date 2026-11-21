@@ -3,7 +3,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import {
   defaultConfig, isSite, mediaKind, officialModes, presets, profileModels, quote, relaySlots,
   siteTemplate, statusLabels, templates, type Comparison, type JobView, type Picked,
-  type ProfileView, type Start, type Template,
+  type ProfileView, type Start, type State, type Template,
 } from '../shared'
 import { Modal } from './Editor'
 import { taskGuidance, useVisibleTime } from './taskHelp'
@@ -34,7 +34,7 @@ interface Option {
 }
 
 export function comparisonOptions(profiles: ProfileView[], official: ProfileView | undefined,
-  currentId: string, currentModel: string, mode: string, assets: Picked[], primary: Parameters): Option[] {
+  currentId: string, currentModel: string, mode: string, assets: Picked[], primary: Parameters, features?:State['modelFeatures']): Option[] {
   const options: Option[] = []
   const current = profiles.find(p => p.Id === currentId) ?? official
   const add = (id: string, model: string, name: string, price: string, parameters: Parameters, p: ProfileView, t?: Template) => {
@@ -59,19 +59,20 @@ export function comparisonOptions(profiles: ProfileView[], official: ProfileView
     if (isSite(p.ProtocolId)) { officialOptions(p.Id, p); continue }
     const preset = presets[p.ProtocolId]
     if (!preset.modes?.includes(mode) && !p.Relay?.workflows?.[mode]) continue
-    const slot = relaySlots(mode, preset.maxImages ?? 1, p.Relay?.workflows?.[mode]?.body)[0]
-    if (slot && assets.length > slot.Max) continue
-    const sizes = p.Relay?.sizes.length ? p.Relay.sizes : p.Controls?.sizes.length ? p.Controls.sizes : preset.sizes
+    const defaults = p.Relay?.sizes.length ? p.Relay.sizes : p.Controls?.sizes.length ? p.Controls.sizes : preset.sizes
     const resolutions = p.Controls?.resolutions.length ? p.Controls.resolutions : preset.resolutions ?? []
-    const ratios = p.Controls?.ratios ?? []
-    const ratio = imageRatio(primary)
-    const parameters = p.Id === currentId ? primary : {
-      size: [primary.size, ratio].find(s => sizes.includes(s)) ?? sizes[0],
-      config: { mode, resolution: resolutions.includes(String(primary.config.resolution)) ? primary.config.resolution : resolutions[0] ?? '',
-        ratio: ratios.includes(ratio) ? ratio : ratios[0] ?? '' }, priority: 0,
+    const ratios = p.Controls?.ratios ?? [], ratio = imageRatio(primary)
+    for (const model of profileModels(p)) {
+      const declared=features?.[[p.Id,p.BaseUrl,model].join('|')]
+      const slot=relaySlots(mode,declared?.maxImages??preset.maxImages??1,p.Relay?.workflows?.[mode]?.body)[0]
+      if (slot && assets.length > slot.Max) continue
+      const sizes=declared?.sizes.length?declared.sizes:defaults
+      const size=[primary.size,ratio].find(v=>sizes.includes(v))??sizes[0]
+      const parameters=p.Id===currentId?{...primary,size:declared?.sizes.length?size:primary.size}:{
+        size,config:{mode,resolution:resolutions.includes(String(primary.config.resolution))?primary.config.resolution:resolutions[0]??'',
+          ratio:ratios.includes(ratio)?ratio:ratios[0]??''},priority:0}
+      add(p.Id,model,p.Name+' · '+model,p.ProtocolId==='comfy-image'?'由所连 ComfyUI 运行':'由服务商结算',parameters,p)
     }
-    for (const model of profileModels(p))
-      add(p.Id, model, p.Name + ' · ' + model, p.ProtocolId === 'comfy-image' ? '本地运行' : '由服务商结算', parameters, p)
   }
   return options
 }

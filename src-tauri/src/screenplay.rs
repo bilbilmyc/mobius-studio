@@ -22,11 +22,11 @@ pub struct ShotLink {
 #[serde(rename_all = "camelCase")]
 pub struct Scene {
     #[serde(default)]
-    id: String,
-    heading: String,
+    pub(crate) id: String,
+    pub(crate) heading: String,
     action: String,
     #[serde(default)]
-    dialogue: String,
+    pub(crate) dialogue: String,
     image_prompt: String,
     video_prompt: String,
 }
@@ -41,7 +41,7 @@ pub struct Screenplay {
 #[serde(rename_all = "camelCase")]
 pub struct Script {
     #[serde(default)]
-    finals: BTreeMap<String, BTreeMap<String, String>>,
+    pub(crate) finals: BTreeMap<String, BTreeMap<String, String>>,
     pub id: String,
     pub created: i64,
     pub model: String,
@@ -51,7 +51,7 @@ pub struct Script {
 }
 
 impl Screenplay {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.title.trim().is_empty()
             || self.title.chars().count() > 200
             || self.scenes.is_empty()
@@ -96,7 +96,7 @@ impl Store {
         self.save_script(&script)?;
         Ok(script)
     }
-    fn script(&self, script_id: &str) -> Result<Script> {
+    pub(crate) fn script(&self, script_id: &str) -> Result<Script> {
         if !valid_id(script_id) {
             return Err("剧本编号无效。".into());
         }

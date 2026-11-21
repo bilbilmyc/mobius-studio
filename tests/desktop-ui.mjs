@@ -23,6 +23,7 @@ import { shotFixture, exerciseTwoShots } from './two-shot-workspace.mjs'
 import { exerciseOptimizer, optimizerFixture } from './prompt-optimizer.mjs'
 import { exerciseGenerationOptimization, generationFixture } from './generation-optimization.mjs'
 import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
+import { exerciseRoadmap } from './project-roadmap.mjs'
 import { exerciseDelivery } from './delivery-specs.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
@@ -408,6 +409,9 @@ async function run() {
     processingTemplate: templates.find(t => t.Video && !t.Text).Key })
   const checkHelp = () => exerciseTaskHelp({ page, base, fixture: help, record, state, done, shot, restart: restartNormally, video })
   const checkDelivery = () => exerciseDelivery({ data, restart: restartNormally, shot, record, base, calls: deliveryCalls, templates, done })
+  const checkRoadmap=()=>exerciseRoadmap({page,data,temp,png,video,templates,restart:restartNormally})
+  if(process.argv.includes('--comfy-only')) {await exerciseComfy({page,base,done,shot,fixture:comfy});return}
+  if(process.argv.includes('--roadmap-only')) {await checkRoadmap();return}
   if (process.argv.includes('--delivery-only')) {
     await checkDelivery()
     assert.deepEqual(errors, [])
@@ -838,6 +842,7 @@ async function run() {
   await checkGeneration()
   await checkHelp()
   await checkDelivery()
+  await checkRoadmap()
   assert.deepEqual(errors, [])
 }
 try {

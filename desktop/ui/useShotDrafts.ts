@@ -8,9 +8,11 @@ const keyOf = (kind: MediaKind, shot?: ShotLink) => [kind, shot?.scriptId, shot?
 
 function references(editor: Composer) {
   const picks = new Map<string, Picked>()
-  for (const variant of Object.values(editor.variants))
+  for (const variant of Object.values(editor.variants)) {
+    if (variant.mask) picks.set(variant.mask.token,variant.mask)
     for (const items of Object.values(variant.byMode))
       for (const pick of items) picks.set(pick.token, pick)
+  }
   return [...picks.values()]
 }
 
@@ -103,5 +105,6 @@ export function useShotDrafts(report: (s: string) => void) {
   let latest: ShotDraft | undefined
   for (const entry of book.current.values())
     if (!latest || latest.updated < entry.updated) latest = entry
-  return { get, change, select, open, syncScript, flush, ready, bindings, latest, status }
+  async function reload() {await flush();const entries=await window.studio.shotDrafts();for(const entry of entries)book.current.set(keyOf(entry.kind,entry.shot),entry);redraw(n=>n+1)}
+  return { get, change, select, open, syncScript, flush, reload, ready, bindings, latest, status }
 }

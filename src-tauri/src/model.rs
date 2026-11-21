@@ -242,6 +242,14 @@ pub struct SiteOptions {
 #[serde(default, rename_all = "PascalCase")]
 pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask: Option<Asset>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidate_ids: Vec<String>,
+    pub native_count: Option<usize>,
+    pub received_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_job: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shot: Option<crate::screenplay::ShotLink>,
     pub id: String,
     pub profile_id: String,
@@ -289,7 +297,7 @@ impl Job {
             .unwrap_or(0)
     }
     pub fn view(&self, file: Option<&str>) -> Value {
-        json!({"id":self.id,"shot":self.shot,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"retryAt":self.retry_at,"progressAt":self.progress_at,"stoppedDuring":self.stopped_during,"hasResultUrl":self.result_url.is_some(),"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
+        json!({"id":self.id,"candidateIds":self.candidate_ids,"sourceJob":self.source_job,"shot":self.shot,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"retryAt":self.retry_at,"progressAt":self.progress_at,"stoppedDuring":self.stopped_during,"hasResultUrl":self.result_url.is_some(),"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
     }
 }
 #[derive(Clone, Deserialize)]
@@ -316,6 +324,10 @@ pub struct Picked {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Start {
+    pub mask: Option<Picked>,
+    pub count: Option<usize>,
+    pub repeat: Option<usize>,
+    pub source_job: Option<String>,
     pub shot: Option<crate::screenplay::ShotLink>,
     pub profile_id: String,
     pub model: Option<String>,

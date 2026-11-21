@@ -144,6 +144,8 @@ export async function exerciseTaskHelp({ page, base, fixture, record, state, don
   await form().getByLabel('API Key', { exact: true }).fill('help-image-ok')
   await form().getByRole('button', { name: '保存连接' }).click()
   await button('复用参数').click()
+  await preview().waitFor({ state: 'hidden' })
+  assert.equal(await prompt().inputValue(), '钥匙失效')
   await submit('模型拼错', 'image')
   await inspect('模型拼错', 'failed')
   await preview().getByText('所选模型不可用').waitFor()

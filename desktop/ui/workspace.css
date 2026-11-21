@@ -231,3 +231,9 @@ input.library-search { width: clamp(170px, 24vw, 340px); }
   .preference-row > div { min-width: 130px; }
   .shot-list li { grid-template-columns: 28px minmax(0, 1fr); gap: 6px; }
 }
+
+.project-tools{display:grid;gap:.85rem;padding:1rem;max-height:72vh;overflow:auto}.project-tools label{display:grid;gap:.3rem}.project-tools label:has(input[type=checkbox]),.mark-tools{display:flex;gap:.55rem;align-items:center;flex-wrap:wrap}.project-tools li{margin:.3rem 0}.mark-tools{padding:.5rem 1rem}.project-tools video,.project-tools img{max-width:100%;max-height:42vh;object-fit:contain}.project-actions{display:flex;flex-wrap:wrap;gap:.45rem;margin:.6rem 0}.candidate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:.65rem}.candidate-grid img{width:100%;height:10rem;object-fit:contain}
+
+.mask-paint{position:relative;width:fit-content;max-width:100%;line-height:0}.mask-paint img{display:block;max-width:100%;max-height:50vh!important}.mask-paint canvas{position:absolute;inset:0;width:100%;height:100%;opacity:.58;touch-action:none;cursor:crosshair}
+
+.project-tools > :is(h3,p,ol,ul){margin-block:.2rem}.project-tools > video{justify-self:center}.project-tools > pre{white-space:pre-wrap;overflow-wrap:anywhere}

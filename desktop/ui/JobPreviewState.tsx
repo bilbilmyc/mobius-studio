@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { statusLabels, type JobView } from '../shared'
+import { invoke } from '@tauri-apps/api/core'
+import { ReceiptRecovery } from './ReceiptRecovery'
 import { canResume, interruptedDownload, taskGuidance, useVisibleTime } from './taskHelp'
 
 const stages = ['提交任务', '模型生成', '保存原文件']
@@ -55,10 +57,10 @@ export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
         : -1
   const now = useVisibleTime(phase >= 0, 1000)
   const guide = !retry && taskGuidance(job, now)
-  async function perform(action: () => Promise<void>, success = '', fallback = '') {
+  async function perform(action: () => Promise<void | string>, success = '', fallback = '') {
     if (busy) return
     setFeedback(''); setBusy(true)
-    try { await action(); setFeedback(success) }
+    try { const message=await action(); setFeedback(typeof message==='string'?message:success) }
     catch (e) { setFeedback(fallback || String(e)) }
     finally { setBusy(false) }
   }
@@ -136,6 +138,8 @@ export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
         {phase >= 0 && (job.created > 0 || !!job.retryAt) && (
           <WaitTime created={job.created} retryAt={job.retryAt} now={now} />
         )}
+        {job.protocol==='comfy-image'&&job.remoteId&&['waiting','paused'].includes(state)&&<button disabled={busy} onClick={()=>void perform(()=>invoke<string>('cancel_remote',{id:job.id}))}>取消此远端任务</button>}
+        {job.status==='uncertain'&&<details><summary>记录人工核对结果</summary>{['服务商确认未受理','已在官网人工取回'].map(outcome=><button key={outcome} disabled={busy} onClick={()=>void perform(()=>invoke('mark_reconciled',{id:job.id,outcome}))}>{outcome}</button>)}</details>}
         {guide && <div className="task-guidance" role="group" aria-label="处理建议">
           <p className="guide-target">{[media, job.profileName, job.model].filter(Boolean).join(' · ')}</p>
           <p>{guide.advice}</p>
@@ -148,6 +152,7 @@ export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
             {job.status === 'failed' && <button disabled={busy} onClick={() => void perform(reuse)}>{promptOnly ? '仅复用提示词' : '复用参数'}</button>}
             <button disabled={busy} onClick={() => void perform(() => window.studio.copyTaskInfo(job.id), '排查信息已复制。', '未能复制，请展开技术详情，手动选取任务号和提交时间。')}>复制排查信息</button>
           </div>
+          {job.status === 'uncertain' && job.protocol.startsWith('rh-') && <ReceiptRecovery key={job.id} job={job} />}
           {feedback && <p role="status">{feedback}</p>}
           <details><summary>技术详情</summary>
             <p>{job.detail || '服务商未返回具体原因。'}</p>

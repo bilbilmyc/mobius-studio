@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { statusLabels, siteTemplate, type Comparison, type Integrations, type JobView, type MediaKind, type Scene, type Script, type ShotLink } from '../shared'
+import { FilmPreview, type NextFrame } from './FilmPreview'
+import { ProjectTransfer } from './ProjectTransfer'
+import { ShotBatch } from './ShotBatch'
 import { ScriptEditor } from './ScriptEditor'
 import { ServiceError } from './UsageHelp'
 
@@ -10,7 +13,8 @@ interface Props {
   usePrompt: (kind: MediaKind, prompt: string, shot: ShotLink) => void
   jobs: JobView[]
   inspect: (job: JobView) => void
-  useFrame: (image: JobView, motion: string) => Promise<void>
+  useFrame: NextFrame
+  imported: () => Promise<void>
   revision: number
   comparisons: Comparison[]
   compare: (group: Comparison) => void
@@ -18,12 +22,13 @@ interface Props {
   edited: (script: Script) => void
 }
 
-export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect, useFrame, revision, comparisons, compare, beforeEdit, edited }: Props) {
+export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect, useFrame, revision, comparisons, compare, beforeEdit, edited, imported }: Props) {
   const [scripts, setScripts] = useState<Script[]>([]), [selected, select] = useState('')
   const [brief, setBrief] = useState(''), [count, setCount] = useState(4)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [writerError, setWriterError] = useState('')
   const [editing, edit] = useState<Script | 'new' | null>(null)
+  const [batch,setBatch] = useState(false), [film,setFilm]=useState(false)
   const script = scripts.find(s => s.id === selected)
   const takesByScene = useMemo(() => {
     const result = new Map<string, JobView[]>()
@@ -75,6 +80,7 @@ export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect
         {writer && <small>{writer.hasKey ? writer.model : '自动生成分镜需要文本模型，也可以在上方手写或粘贴。'}</small>}
         {writerError && <ServiceError message={writerError} context="writer" configure={configure} />}
       </form>
+      <ProjectTransfer scriptId={script?.id} flush={beforeEdit} imported={async id=>{await imported();const all=await window.studio.scripts();setScripts(all);select(id)}}/>
       <div className="script-history"><h2>我的剧本</h2>
         {scripts.map(s => <button key={s.id} aria-current={s.id === selected ? 'true' : undefined} onClick={() => select(s.id)}>
           <b>{s.title}</b><small>{s.scenes.length} 镜 · {new Date(s.created).toLocaleDateString()}</small></button>)}
@@ -87,6 +93,9 @@ export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect
       {script ? <>
         <div className="manuscript-title"><div><small>{script.scenes.length} 个分镜 · {script.model}</small>
           <h2>{script.title}</h2></div><button onClick={() => edit(script)}>编辑剧本</button></div>
+        <div className="project-actions"><button onClick={()=>setBatch(true)}>镜头队列与预算</button><button onClick={()=>setFilm(true)}>整片预览与交付</button></div>
+        {film && <FilmPreview script={script} jobs={jobs} close={()=>setFilm(false)} frame={useFrame} locate={id=>{setFilm(false);requestAnimationFrame(()=>document.getElementById('scene-'+id)?.focus())}}/>}
+        {batch && <ShotBatch key={script.id} script={script} close={()=>setBatch(false)} flush={beforeEdit}/>}
         {script.brief && <p className="story-brief">{script.brief}</p>}
         <ol className="shot-list">
           {script.scenes.map((scene, index) => {
@@ -94,7 +103,7 @@ export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect
             const takes = takesByScene.get(scene.id) ?? []
             const finals = script.finals[scene.id] ?? {}
             const first = takes.find(j => j.id === finals.image && j.file)
-            return <li key={scene.id}>
+            return <li key={scene.id} id={'scene-'+scene.id} tabIndex={-1}>
             <span className="shot-number" aria-label={`分镜 ${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
             <article><h3>{scene.heading}</h3><p>{scene.action}</p>
               {scene.dialogue && <blockquote>{scene.dialogue}</blockquote>}

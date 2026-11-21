@@ -63,14 +63,16 @@ impl Studio {
                 key = self.store.vault.get(&profile, &profile.base_url)?;
             }
         }
-        if matches!(input.source, Source::Comfy { .. }) {
-            return crate::comfy::models(&self.http, &entered, &key)
-                .await
-                .map_err(|e| e.message);
+        let catalog = if matches!(input.source, Source::Comfy { .. }) {
+            crate::comfy::models(&self.http, &entered, &key).await
+        } else {
+            request_catalog(&self.http, base, url.path() == "/", scheme, &key).await
         }
-        request_catalog(&self.http, base, url.path() == "/", scheme, &key)
-            .await
-            .map_err(|e| e.message)
+        .map_err(|e| e.message)?;
+        if !matches!(input.source, Source::Writer) {
+            self.store.remember_catalog(&catalog)?;
+        }
+        Ok(catalog)
     }
 }
 

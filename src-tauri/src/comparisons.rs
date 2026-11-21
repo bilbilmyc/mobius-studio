@@ -135,7 +135,7 @@ impl Studio {
         save(&path, &record)?;
         self.store.materialize(&mut record)?;
         for job in jobs {
-            self.launch(job, true)?;
+            self.submit_new(job)?;
         }
         self.changed();
         Ok(group)

@@ -1,18 +1,32 @@
+mod batches;
 mod catalog;
 mod comfy;
 mod comparisons;
 mod creation;
+mod custom_graph;
 mod export;
+mod film;
 mod inputs;
 mod jobs;
+mod masks;
+mod media_tools;
 mod model;
+mod model_features;
 mod object_storage;
+mod organize;
 #[cfg(test)]
 mod poll_tests;
+mod portable_profiles;
 mod preferences;
 #[cfg(target_os = "linux")]
 mod preview;
+mod project_archive;
+#[cfg(test)]
+mod project_tests;
 mod provider;
+mod receipts;
+mod reconciliation;
+mod remote_archive;
 mod screenplay;
 mod shot_drafts;
 mod store;
@@ -41,6 +55,10 @@ fn view(app: &AppHandle, s: &Studio, j: &Job, labels: &mut ShotLabels) -> Value 
         let _ = app.asset_protocol_scope().allow_file(p);
     }
     let mut view = j.view(file.as_ref().and_then(|p| p.to_str()));
+    view["estimatedCny"] = json!(batches::estimate(j));
+    if s.group_file(&j.id).is_file() {
+        view["hasResultUrl"] = json!(true);
+    }
     if let Some(link) = &j.shot {
         let scenes = labels
             .entry(link.script_id.clone())
@@ -70,6 +88,7 @@ async fn studio_state(app: AppHandle, s: Core<'_>) -> Result<Value> {
         let mut labels = ShotLabels::new();
         let jobs = core.store.jobs()?.iter().map(|j|view(&app,&core,j,&mut labels)).collect::<Vec<_>>();
         let state = json!({
+            "modelFeatures":core.store.feature_map()?,
             "profiles": profiles.iter().map(|p|core.store.profile_view(p)).collect::<Vec<_>>(),
             "official": core.store.profile_view(&official), "jobs": jobs, "comparisons":core.store.comparisons()?, "keyStorage": vault::Vault::note(),
         });
@@ -302,9 +321,12 @@ async fn pick_files(
 async fn start_job(s: Core<'_>, input: Start) -> Result<String> {
     let core = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        if let Some(n) = input.repeat.filter(|n| *n > 1) {
+            return core.start_repeats(input, n);
+        }
         let j = core.prepare(input)?;
         let id = j.id.clone();
-        core.launch(j, true)?;
+        core.submit_new(j)?;
         Ok(id)
     })
     .await
@@ -313,7 +335,9 @@ async fn start_job(s: Core<'_>, input: Start) -> Result<String> {
 #[tauri::command]
 fn resume_job(s: Core, id: String) -> Result<()> {
     let j = s.store.job(&id)?;
-    if j.status != "paused" || j.remote_id.is_none() && j.result_url.is_none() {
+    if j.status != "paused"
+        || j.remote_id.is_none() && j.result_url.is_none() && !s.group_file(&j.id).is_file()
+    {
         return Err("没有可恢复的任务编号或下载地址。".into());
     }
     s.inner().launch(j, false)
@@ -338,7 +362,15 @@ fn reuse_job(app: AppHandle, s: Core, id: String) -> Result<Value> {
     if let Some(p) = &j.reference {
         picks.push(s.store.register("image", s.store.input(p)?, None)?);
     }
-    Ok(json!({"job":view(&app,&s,&j,&mut ShotLabels::new()),"assets":picks}))
+    let mask = j
+        .mask
+        .as_ref()
+        .map(|a| {
+            s.store
+                .register("image", s.store.input(&a.path)?, Some(a.name.clone()))
+        })
+        .transpose()?;
+    Ok(json!({"job":view(&app,&s,&j,&mut ShotLabels::new()),"assets":picks,"mask":mask}))
 }
 #[tauri::command]
 fn job_frame(s: Core, id: String) -> Result<Picked> {
@@ -665,6 +697,35 @@ pub fn run() {
             asset_preview,
             start_job,
             resume_job,
+            batches::create_batch,
+            batches::list_batches,
+            custom_graph::configure_graph,
+            custom_graph::get_graph,
+            media_tools::media_tools,
+            media_tools::choose_media_tools,
+            masks::save_mask,
+            masks::save_captured_frame,
+            model_features::get_model_features,
+            model_features::set_model_features,
+            film::deliver_film,
+            film::extract_frame,
+            project_archive::export_project,
+            project_archive::pick_project,
+            project_archive::import_project,
+            organize::save_card,
+            organize::list_cards,
+            organize::library_marks,
+            organize::mark_work,
+            organize::choose_candidate,
+            organize::candidate_choice,
+            batches::run_batch,
+            batches::withdraw_job,
+            receipts::check_receipt,
+            receipts::attach_receipt,
+            reconciliation::get_charge,
+            reconciliation::record_charge,
+            reconciliation::mark_reconciled,
+            reconciliation::cancel_remote,
             reuse_job,
             job_frame,
             copy_job_image,

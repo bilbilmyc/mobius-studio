@@ -77,7 +77,9 @@ pub fn client() -> Result<Client> {
         .build()
         .map_err(|e| e.to_string())
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Output {
+    Many(Vec<Output>),
     Ticket(String),
     Pending(String),
     Url(String),
@@ -176,7 +178,7 @@ pub(crate) async fn response_json(reply: reqwest::Response, key: &str) -> Reply<
     }
     Ok(serde_json::from_slice(&body.map_err(Fault::transport)?).ok())
 }
-fn envelope(v: Value, key: &str) -> Reply<Value> {
+pub(crate) fn envelope(v: Value, key: &str) -> Reply<Value> {
     let code = text(&v, "code")
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(-1);
@@ -360,6 +362,9 @@ pub async fn submit(
         .unwrap_or("720p");
     if proto == "openai-image" {
         let mut payload = json!({"model":j.model,"prompt":j.prompt,"size":j.size});
+        if let Some(n) = j.native_count {
+            payload["n"] = json!(n)
+        }
         let quality = j
             .settings
             .get("quality")
@@ -380,19 +385,39 @@ pub async fn submit(
         } else {
             let mut form = reqwest::multipart::Form::new();
             for (k, v) in payload.as_object().unwrap() {
-                form = form.text(k.clone(), string(v).to_owned())
+                form = form.text(
+                    k.clone(),
+                    v.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| v.to_string()),
+                )
             }
-            let field = if inputs.len() == 1 {
+            let field = if inputs.iter().filter(|i| i.kind != "mask").count() == 1 {
                 "image"
             } else {
                 "image[]"
             };
             for a in inputs {
-                form = form.part(field, a.part().await?);
+                form = form.part(
+                    if a.kind == "mask" { "mask" } else { field },
+                    a.part().await?,
+                );
             }
             post("images/edits")?.multipart(form)
         };
         let v = json_response(auth(req, "bearer", key), key).await?;
+        if j.native_count.is_some() {
+            let rows = v["data"]
+                .as_array()
+                .ok_or_else(|| Fault::uncertain("服务商未返回候选清单。"))?;
+            return rows
+                .iter()
+                .map(|row| {
+                    media(row, "url", "b64_json").ok_or_else(|| Fault::uncertain("候选缺少图片。"))
+                })
+                .collect::<Reply<Vec<_>>>()
+                .map(Output::Many);
+        }
         return media(&v, "data.0.url", "data.0.b64_json")
             .ok_or_else(|| Fault::uncertain("响应中没有图片，请核对中转站记录。"));
     }
@@ -405,7 +430,7 @@ pub async fn submit(
             content.push(json!({"text":j.prompt}));
             (
                 "services/aigc/image-generation/generation",
-                json!({"model":j.model,"input":{"messages":[{"role":"user","content":content}]},"parameters":{"size":j.size.replace('x',"*"),"n":1}}),
+                json!({"model":j.model,"input":{"messages":[{"role":"user","content":content}]},"parameters":{"size":j.size.replace('x',"*"),"n":j.native_count.unwrap_or(1)}}),
             )
         }
         "wan-video" => (
@@ -599,6 +624,26 @@ pub async fn query(h: &Client, j: &Job, key: &str) -> Reply<Output> {
                 .or_else(|| text(&v, "url"))
                 .unwrap_or(content_url(j)?.to_string()),
         ));
+    }
+    if proto == "wan-image" && j.native_count.is_some() {
+        let rows = if let Some(items) = v.pointer("/output/results").and_then(Value::as_array) {
+            items
+                .iter()
+                .filter_map(|r| text(r, "url"))
+                .map(Output::Url)
+                .collect()
+        } else {
+            v.pointer("/output/choices")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c.pointer("/message/content").and_then(Value::as_array))
+                .flatten()
+                .filter_map(|r| text(r, "image"))
+                .map(Output::Url)
+                .collect::<Vec<_>>()
+        };
+        return Ok(Output::Many(rows));
     }
     let path = if site(proto) {
         "result_oss_url"

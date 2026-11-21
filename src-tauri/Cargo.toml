@@ -1,6 +1,6 @@
 [package]
 name = "mobius-studio"
-version = "2.9.1"
+version = "2.10.0"
 edition = "2021"
 description = "莫比环本地图片与视频工作台"
 build = "build.rs"
@@ -31,6 +31,7 @@ rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto
 http = "1"
 reqsign-aliyun-oss = "3.2.1"
 reqsign-core = "3.3.3"
+tar = { version = "0.4", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = {version = "0.61",features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

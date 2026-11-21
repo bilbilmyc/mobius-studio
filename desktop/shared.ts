@@ -327,6 +327,9 @@ export interface Job {
   CreatedUtc: string
 }
 export interface JobView {
+  estimatedCny?: number|null
+  candidateIds?: string[]
+  sourceJob?: string
   shot?: ShotLink | null
   cloud?: { status: 'pending' | 'uploading' | 'saved' | 'failed'; uri: string; endpoint: string; detail: string } | null
   mediaUrl?: string
@@ -355,6 +358,7 @@ export interface JobView {
   site?: { config: Record<string, Value>; priority: number }
 }
 export interface Start {
+  count?: number; repeat?: number; mask?: Picked; sourceJob?: string
   shot?: ShotLink
   profileId: string
   model?: string
@@ -368,6 +372,7 @@ export interface Start {
   assets: Picked[]
 }
 export interface State {
+  modelFeatures?:Record<string,{sizes:string[];maxImages?:number|null;firstLast?:boolean|null;mask?:boolean|null;multi?:number|null}>
   comparisons: Comparison[]
   profiles: ProfileView[]
   official: ProfileView
@@ -375,6 +380,7 @@ export interface State {
   keyStorage: string
 }
 export interface Reuse {
+  mask?: Picked
   job: JobView
   assets: Picked[]
 }
@@ -416,6 +422,7 @@ export interface Script extends Screenplay {
 }
 export interface ShotLink { scriptId: string; sceneId: string; label: string }
 export interface ModelDraft {
+  count?: number; mask?: Picked; sourceJob?: string
   config: Record<string, Value>
   priority: number
   size: string
@@ -486,6 +493,7 @@ export function quote(
   )
 }
 export const statusLabels: Record<string, string> = {
+  reviewed: '已人工核对', cancelled: '远端已取消', missing: '本地记录缺失', queued: '待发送', withdrawn: '已撤回', archived: '已导入历史',
   preparing: '准备素材',
   submitting: '提交中',
   waiting: '生成中',
@@ -498,8 +506,8 @@ export const statusLabels: Record<string, string> = {
 export type JobStatusGroup = 'active' | 'attention' | 'done'
 
 export function jobStatusGroup(status: string): JobStatusGroup {
-  if (status === 'done') return 'done'
-  if (['preparing', 'submitting', 'waiting', 'downloading'].includes(status)) return 'active'
+  if (['done', 'withdrawn', 'archived', 'reviewed', 'cancelled'].includes(status)) return 'done'
+  if (['queued', 'preparing', 'submitting', 'waiting', 'downloading'].includes(status)) return 'active'
   return 'attention'
 }
 

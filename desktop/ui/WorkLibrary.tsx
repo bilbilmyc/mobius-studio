@@ -1,4 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { LibraryMarks, unmarked, type LibraryMark } from './LibraryMarks'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { jobStatusGroup, siteTemplate, type Integrations, type JobStatusGroup, type JobView, type MediaKind } from '../shared'
 import { BatchExport } from './BatchExport'
 import { CloudSave } from './CloudSave'
@@ -42,14 +44,20 @@ export function WorkLibrary({
 }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [collection,setCollection] = useState('current'), [marks,setMarks] = useState<Record<string,LibraryMark>>({})
+  useEffect(()=>{void invoke<Record<string,LibraryMark>>('library_marks').then(setMarks).catch(e=>report(String(e)))},[report])
   const { search, kind, status } = view
   const filtered = useMemo(() => {
     const words = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
     return jobs.filter((j) => {
+      const mark=marks[j.id] ?? unmarked
+      if (collection==='archived' ? !mark.archived : mark.archived) return false
+      if (collection==='favorite' && !mark.favorite) return false
       if (kind !== 'all' && j.kind !== kind) return false
       if (status !== 'all' && jobStatusGroup(j.status) !== status) return false
       if (!words.length) return true
       const fields = [
+        ...mark.tags,
         j.prompt,
         j.model,
         siteTemplate(j.model)?.Name,
@@ -62,7 +70,7 @@ export function WorkLibrary({
         .toLocaleLowerCase()
       return words.every((word) => fields.includes(word))
     })
-  }, [jobs, search, kind, status])
+  }, [jobs, search, kind, status, marks, collection])
   const { items, page, pages } = paginate(filtered, view.page)
   const selected = items.find((j) => j.id === selectedId)
   const matching = Boolean(search.trim() || kind !== 'all' || status !== 'all')
@@ -79,10 +87,13 @@ export function WorkLibrary({
 
   return (
     <section className="library-page" aria-label="作品库">
+      {selected && <LibraryMarks key={selected.id} id={selected.id} mark={marks[selected.id] ?? unmarked} changed={m=>setMarks(old=>({...old,[selected.id]:m}))}/>}
       <div className="section-bar">
         <small>
           {filtered.length} 条{matching ? '匹配作品' : '本地任务'}
         </small>
+        <select aria-label="作品收藏与归档" value={collection} onChange={e=>{setCollection(e.target.value);change({})}}>
+          <option value="current">当前作品</option><option value="favorite">已收藏</option><option value="archived">已归档</option></select>
         <input
           type="search"
           className="library-search"

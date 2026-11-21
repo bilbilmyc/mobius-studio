@@ -93,7 +93,12 @@ pub fn validate_controls(c: &Controls) -> Result<()> {
     }
     Ok(())
 }
-pub fn prepare(j: &mut Job, c: Option<&Controls>, store: &Store) -> Result<()> {
+pub fn prepare_with_limit(
+    j: &mut Job,
+    c: Option<&Controls>,
+    store: &Store,
+    limit: Option<usize>,
+) -> Result<()> {
     if j.prompt.trim().is_empty() {
         return Err("请填写提示词。".into());
     }
@@ -147,7 +152,7 @@ pub fn prepare(j: &mut Job, c: Option<&Controls>, store: &Store) -> Result<()> {
     }
     let n = j.assets.len();
     let images = j.assets.iter().filter(|a| a.kind == "image").count();
-    let max = table["maxImages"].as_u64().unwrap_or(1) as usize;
+    let max = limit.unwrap_or_else(|| table["maxImages"].as_u64().unwrap_or(1) as usize);
     let valid = match mode.as_str() {
         "t2i" | "t2v" => n == 0,
         "i2i" => n == images && (1..=max).contains(&images),
@@ -218,6 +223,11 @@ pub fn prepare(j: &mut Job, c: Option<&Controls>, store: &Store) -> Result<()> {
     }
     if total > 150 * 1024 * 1024 {
         return Err("单次请求的本地素材合计超过 150 MiB。可改用受支持的 HTTPS 素材链接。".into());
+    }
+    if j.protocol_id == "comfy-image" {
+        if let Some(g) = crate::custom_graph::selected(j)? {
+            return crate::custom_graph::actual_parameters(j, &g);
+        }
     }
     let fallback = Controls::default();
     let c = c.unwrap_or(&fallback);
