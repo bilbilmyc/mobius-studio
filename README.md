@@ -97,14 +97,14 @@ npm run installer
 npm test
 ```
 
-`npm start` 启动开发窗口。`npm run package` 生成便携版，`npm run installer` 生成当前系统和处理器的安装包，均输出到 `dist`。构建同系统的另一种处理器架构时，安装相应 Rust target 与原生编译工具链，追加 `-- --arch=arm64` 或 `-- --arch=x64`。Windows 也可以运行 `.\build.ps1 -Installer -Arch x64`。在 Windows x64 上构建 ARM64，需要 `rustup target add aarch64-pc-windows-msvc`、Visual Studio 的 ARM64 C++ 工具与库、相应的 Windows SDK，并让命令行能找到 `clang`。Linux 工作流直接在相应架构的 Ubuntu 上构建。macOS 使用 Apple Silicon 原生构建机，发行包为单架构 arm64 DMG。
+`npm start` 启动开发窗口。Windows 与 Linux 可用 `npm run package` 生成便携版，用 `npm run installer` 生成安装包。macOS 的两个命令均生成 arm64 DMG。产物输出到 `dist`。构建同系统的另一种处理器架构时，安装相应 Rust target 与原生编译工具链，追加 `-- --arch=arm64` 或 `-- --arch=x64`。Windows 也可以运行 `.\build.ps1 -Installer -Arch x64`。在 Windows x64 上构建 ARM64，需要 `rustup target add aarch64-pc-windows-msvc`、Visual Studio 的 ARM64 C++ 工具与库、相应的 Windows SDK，并让命令行能找到 `clang`。Linux 工作流直接在相应架构的 Ubuntu 上构建。macOS 使用 Apple Silicon 原生构建机，发行包为单架构 arm64 DMG。
 
 ```sh
 npm run installer -- --arch=arm64
 bash tests/macos-dmg.sh
 ```
 
-在 GitHub Actions 手动运行「macOS Apple Silicon DMG」可得到 `Mobius-macOS-arm64` 构件。流程检查 DMG 完整性、Mach-O 架构、最低系统版本及本机签名，将应用复制到临时 Applications 目录并卸载磁盘映像，再启动应用并等待真实 WebView 成功调用本地数据接口。构件采用 ad-hoc 签名。
+在 GitHub Actions 手动运行「macOS Apple Silicon DMG」可得到 `Mobius-macOS-arm64` 构件。流程检查 DMG 完整性、Mach-O 架构、最低系统版本及本机签名，将应用复制到临时 Applications 目录并卸载磁盘映像，再启动应用并等待真实 WebView 成功调用本地数据接口。自测还会恢复一条图片下载任务，使用临时钥匙串凭据向本机 S3 测试服务上传原图，校验签名与文件内容。构件采用 ad-hoc 签名。
 
 仓库提供可手动运行的桌面构建工作流。Windows 打包后可运行 `npm run test:desktop`，需要 FFmpeg。它使用独立的临时数据目录，在真实 WebView 中测试官网模板、文字和带图模式、二进制表单、模型参数、首尾帧顺序、任务恢复和视频播放。Rust 测试覆盖凭据隔离、旧数据路径、参数校验、导出尺寸和中断恢复。Linux 的原生 WebKitGTK 回归使用 `tests/linux-webview.py`、WebKitWebDriver 和一个本地 H.264 样片，验证带认证的首尾帧请求、HTTP 分段读取与视频解码。手动构建工作流包含这两组桌面回归。
 

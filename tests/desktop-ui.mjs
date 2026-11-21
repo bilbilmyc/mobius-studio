@@ -16,6 +16,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 import { creationMock, exerciseCreation } from './creation-matrix.mjs'
+import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -221,7 +222,9 @@ try {
   const clip = origin(files) + '/out.mp4',
     still = origin(files) + '/out.png'
   const matrix = creationMock({ clip, still, png })
+  const workspace = workspaceMock(png)
   relay = await listen(async (req, res, bytes) => {
+    if (workspace.handle(req, res, bytes)) return
     if (await matrix.handle(req, res, bytes)) return
     const url = req.url,
       headers = req.headers
@@ -591,13 +594,19 @@ try {
     shot,
     templates,
   })
+  await exerciseWorkspace({ page, base, oldId, shot, state, mock: workspace })
   await stop()
   await delay(500)
   await start()
   assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
   await page.getByRole('button', { name: '视频', exact: true }).click()
   assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
-  assert.equal((await state()).jobs.length, 20 + extra)
+  assert.equal((await state()).jobs.length, 21 + extra)
+  await page.getByRole('button', { name: '剧本', exact: true }).click()
+  await page.getByRole('heading', { name: '渡口，日出之前' }).waitFor()
+  const settings = await page.evaluate(() => window.studio.settings())
+  assert.ok(settings.writer.hasKey && settings.hasStorageKey && settings.storage.automatic)
+  console.log('Screenplay editing, scene handoff, manual and automatic signed uploads, retry and restart passed')
   assert.deepEqual(errors, [])
   console.log(
     'Packaged IPC, 12 RH submissions, 7 third-party protocols, restart, scoped credentials and native video playback passed',
