@@ -21,6 +21,9 @@ pub struct Lookup {
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum Source {
     Writer,
+    Comfy {
+        id: Option<String>,
+    },
     Connection {
         id: Option<String>,
         auth: Option<String>,
@@ -37,27 +40,33 @@ impl Studio {
     pub async fn discover_models(&self, input: Lookup) -> Result<Catalog> {
         let entered = canonical_base(&input.base)?;
         let url = url::Url::parse(&entered).map_err(|e| e.to_string())?;
-        let base = if url.path().ends_with("/models") {
-            entered.strip_suffix("/models").unwrap_or(&entered)
-        } else {
-            &entered
-        };
+        let base =
+            if !matches!(input.source, Source::Comfy { .. }) && url.path().ends_with("/models") {
+                entered.strip_suffix("/models").unwrap_or(&entered)
+            } else {
+                &entered
+            };
         let mut key = input.key.trim().to_owned();
         let scheme = match &input.source {
-            Source::Writer => "bearer",
+            Source::Writer | Source::Comfy { .. } => "bearer",
             Source::Connection { auth, .. } => auth.as_deref().unwrap_or("bearer"),
         };
         if key.is_empty() && scheme != "none" {
             let saved = match &input.source {
                 Source::Writer => Some(self.store.preferences()?.writer),
-                Source::Connection { id: Some(id), .. } => {
+                Source::Connection { id: Some(id), .. } | Source::Comfy { id: Some(id) } => {
                     self.store.profiles()?.into_iter().find(|p| &p.id == id)
                 }
-                Source::Connection { id: None, .. } => None,
+                Source::Connection { id: None, .. } | Source::Comfy { id: None } => None,
             };
             if let Some(profile) = saved.filter(|p| p.base_url == entered || p.base_url == base) {
                 key = self.store.vault.get(&profile, &profile.base_url)?;
             }
+        }
+        if matches!(input.source, Source::Comfy { .. }) {
+            return crate::comfy::models(&self.http, &entered, &key)
+                .await
+                .map_err(|e| e.message);
         }
         request_catalog(&self.http, base, url.path() == "/", scheme, &key)
             .await

@@ -296,6 +296,9 @@ pub fn prepare(j: &mut Job, c: Option<&Controls>, store: &Store) -> Result<()> {
         r
     };
     j.settings.insert("ratio".into(), json!(r));
+    if j.protocol_id == "comfy-image" {
+        crate::comfy::prepare(j)?;
+    }
     if let Some(q) = j.settings.get("quality") {
         if j.protocol_id != "openai-image"
             || !matches!(q.as_str(), Some("" | "auto" | "low" | "medium" | "high"))

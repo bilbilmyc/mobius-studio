@@ -9,18 +9,30 @@ use tokio_util::io::ReaderStream;
 pub struct Fault {
     pub message: String,
     pub definite: bool,
+    // Only read-only status queries use this. Zero allows the client's normal backoff.
+    pub poll_retry_after: Option<Duration>,
 }
 impl Fault {
     pub fn uncertain(s: impl ToString) -> Self {
         Self {
             message: s.to_string(),
             definite: false,
+            poll_retry_after: None,
         }
     }
     pub fn known(s: impl ToString) -> Self {
         Self {
             message: s.to_string(),
             definite: true,
+            poll_retry_after: None,
+        }
+    }
+    fn transport(error: reqwest::Error) -> Self {
+        let transient =
+            error.is_timeout() || error.is_connect() || error.is_body() || error.is_request();
+        Self {
+            poll_retry_after: transient.then_some(Duration::ZERO),
+            ..Self::uncertain(error.without_url())
         }
     }
 }
@@ -30,6 +42,26 @@ impl From<String> for Fault {
     }
 }
 pub type Reply<T> = std::result::Result<T, Fault>;
+pub(crate) const POLL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn poll_retry_after(status: i64, hint: Option<&str>) -> Option<Duration> {
+    if !matches!(status, 408 | 429 | 500 | 502 | 503 | 504) {
+        return None;
+    }
+    let delay = hint.and_then(|value| {
+        let value = value.trim();
+        if let Ok(seconds) = value.parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+        let at = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+        Some(
+            (at.to_utc() - chrono::Utc::now())
+                .to_std()
+                .unwrap_or_default(),
+        )
+    });
+    Some(delay.unwrap_or_default())
+}
 pub fn client() -> Result<Client> {
     Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -40,7 +72,7 @@ pub fn client() -> Result<Client> {
 }
 pub enum Output {
     Ticket(String),
-    Pending,
+    Pending(String),
     Url(String),
     Inline(String),
     Failed(String),
@@ -96,23 +128,26 @@ pub(crate) fn auth(r: RequestBuilder, scheme: &str, key: &str) -> RequestBuilder
     }
 }
 pub(crate) async fn json_response(request: RequestBuilder, key: &str) -> Reply<Value> {
-    let reply = request
-        .send()
-        .await
-        .map_err(|e| Fault::uncertain(e.without_url()))?;
+    let reply = request.send().await.map_err(Fault::transport)?;
     response_json(reply, key)
         .await?
         .ok_or_else(|| Fault::uncertain("服务返回的内容不是 JSON，请核对地址和协议。"))
 }
 pub(crate) async fn response_json(reply: reqwest::Response, key: &str) -> Reply<Option<Value>> {
     let status = reply.status();
-    let raw = reply
-        .bytes()
-        .await
-        .map_err(|e| Fault::uncertain(e.without_url()))?;
-    let value = serde_json::from_slice::<Value>(&raw);
+    let retry = poll_retry_after(
+        i64::from(status.as_u16()),
+        reply
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+    );
+    let body = reply.bytes().await;
     if !status.is_success() {
-        let v = value.unwrap_or(Value::Null);
+        let v = body
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(Value::Null);
         let msg = text(&v, "error.message")
             .or_else(|| text(&v, "message"))
             .or_else(|| text(&v, "msg"))
@@ -120,9 +155,10 @@ pub(crate) async fn response_json(reply: reqwest::Response, key: &str) -> Reply<
         return Err(Fault {
             message: format!("HTTP {} {}", status.as_u16(), protect_text(&msg, key)),
             definite: status.is_client_error() && status.as_u16() != 408,
+            poll_retry_after: retry,
         });
     }
-    Ok(value.ok())
+    Ok(serde_json::from_slice(&body.map_err(Fault::transport)?).ok())
 }
 fn envelope(v: Value, key: &str) -> Reply<Value> {
     let code = text(&v, "code")
@@ -134,6 +170,7 @@ fn envelope(v: Value, key: &str) -> Reply<Value> {
         Err(Fault {
             message: format!("官网返回 {code} {}", protect_text(string(&v["msg"]), key)),
             definite: (400..500).contains(&code) && code != 408,
+            poll_retry_after: poll_retry_after(code, None),
         })
     }
 }
@@ -218,6 +255,9 @@ pub async fn submit(
 ) -> Reply<Output> {
     let post = |path: &str| route(&j.base_url, path).map(|u| h.post(u));
     let proto = j.protocol_id.as_str();
+    if proto == "comfy-image" {
+        return crate::comfy::submit(h, j, key, inputs).await;
+    }
     if site(proto) {
         if key.is_empty() {
             return Err(Fault::known("请连接官网 Key。"));
@@ -440,6 +480,9 @@ pub async fn query(h: &Client, j: &Job, key: &str) -> Reply<Output> {
     );
     let proto = j.protocol_id.as_str();
     let r = j.relay.as_ref();
+    if proto == "comfy-image" {
+        return crate::comfy::query(h, j, key, &id).await;
+    }
     let path = if custom(proto) {
         r.ok_or_else(|| Fault::known("缺少接口映射"))?
             .poll
@@ -458,7 +501,7 @@ pub async fn query(h: &Client, j: &Job, key: &str) -> Reply<Output> {
     };
     let raw = json_response(
         auth(
-            h.get(route(&j.base_url, &path)?),
+            h.get(route(&j.base_url, &path)?).timeout(POLL_TIMEOUT),
             if site(proto) {
                 "none"
             } else {
@@ -494,7 +537,19 @@ pub async fn query(h: &Client, j: &Job, key: &str) -> Reply<Output> {
         r.map(|d| d.waiting.as_str())
             .unwrap_or("pending,preparing,queued,running,in_progress,processing"),
     ) {
-        return Ok(Output::Pending);
+        let detail = match state.as_str() {
+            "queued" => "服务商已接收，正在排队",
+            "running" | "in_progress" | "processing" => "服务商正在生成",
+            "preparing" => "服务商正在准备任务",
+            _ => "服务商已接收，等待处理",
+        };
+        let progress = v["progress"]
+            .as_u64()
+            .filter(|&p| proto == "openai-video" && p <= 100);
+        return Ok(Output::Pending(match progress {
+            Some(p) => format!("{detail}，服务进度 {p}%。"),
+            None => format!("{detail}。"),
+        }));
     }
     if member(
         r.map(|d| d.failure.as_str())
@@ -557,6 +612,13 @@ pub async fn download(h: &Client, j: &Job, raw: &str, key: &str) -> Reply<reqwes
             return Err(Fault::known("结果地址无效"));
         }
         let mut req = h.get(dest.clone());
+        if hop == 0
+            && j.protocol_id == "comfy-image"
+            && route(&j.base_url, "view")
+                .is_ok_and(|u| u.origin() == dest.origin() && u.path() == dest.path())
+        {
+            req = auth(req, "bearer", key);
+        }
         if hop == 0
             && j.protocol_id == "openai-video"
             && content_url(j).is_ok_and(|url| url == dest)

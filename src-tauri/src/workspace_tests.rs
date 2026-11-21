@@ -17,6 +17,111 @@ use std::sync::{
     Arc,
 };
 
+#[test]
+fn thumbnail_reuses_cache_and_detects_replaced_originals() {
+    use image::{ImageBuffer, Luma, Rgb, RgbImage};
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::new(temp.path().into()).unwrap();
+    let job = Job {
+        id: id(),
+        protocol_id: "rh-image".into(),
+        status: "done".into(),
+        file_name: Some("art.png".into()),
+        ..Default::default()
+    };
+    let original = store.home.join("作品/art.png");
+    RgbImage::from_pixel(900, 450, Rgb([5, 100, 200]))
+        .save(&original)
+        .unwrap();
+    store.save_job(&job).unwrap();
+    let cached = store.thumbnail(&job.id).unwrap();
+    assert_eq!(image::image_dimensions(&cached).unwrap(), (384, 192));
+    assert_eq!(store.thumbnail(&job.id).unwrap(), cached);
+    assert!(crate::export::gpu_input(&original).is_ok());
+    ImageBuffer::from_pixel(9, 3, Luma([4000u16]))
+        .save(&original)
+        .unwrap();
+    let second = store.thumbnail(&job.id).unwrap();
+    assert_ne!(cached, second);
+    assert_eq!(image::image_dimensions(second).unwrap(), (9, 3));
+    assert!(crate::export::gpu_input(&original).is_err());
+    std::fs::write(original, b"unreadable image").unwrap();
+    assert!(store.thumbnail(&job.id).is_err());
+}
+
+#[test]
+fn legacy_scene_links_survive_edits_and_reject_unrelated_jobs() {
+    use crate::screenplay::ShotLink;
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::new(temp.path().into()).unwrap();
+    let script_id = id();
+    let scene =
+        json!({"heading":"外景","action":"船离岸","imagePrompt":"小船","videoPrompt":"跟随小船"});
+    let story = json!({"title":"晨渡","scenes":[scene.clone(),scene]});
+    let mut disk = story.clone();
+    disk["id"] = json!(script_id);
+    disk["created"] = json!(1);
+    disk["brief"] = json!("小船");
+    disk["model"] = json!("writer");
+    std::fs::create_dir(store.home.join("剧本")).unwrap();
+    std::fs::write(
+        store.home.join("剧本").join(format!("{script_id}.json")),
+        serde_json::to_vec(&disk).unwrap(),
+    )
+    .unwrap();
+    let read = || serde_json::to_value(&store.scripts().unwrap()[0]).unwrap();
+    let scenes = read()["scenes"].clone();
+    let first = scenes[0]["id"].as_str().unwrap();
+    let second = scenes[1]["id"].as_str().unwrap();
+    assert_ne!(first, second);
+    assert_eq!(scenes, read()["scenes"]);
+    store
+        .edit_script(&script_id, serde_json::from_value(story.clone()).unwrap())
+        .unwrap();
+    assert_eq!(scenes, read()["scenes"]);
+    let link = store
+        .resolve_shot(ShotLink {
+            script_id: script_id.clone(),
+            scene_id: first.into(),
+            label: String::new(),
+        })
+        .unwrap();
+    let job = Job {
+        id: id(),
+        status: "done".into(),
+        protocol_id: "rh-image".into(),
+        shot: Some(link),
+        file_name: Some("frame.png".into()),
+        ..Default::default()
+    };
+    store.save_job(&job).unwrap();
+    assert!(store
+        .set_final(&script_id, first, "image", Some(&job.id))
+        .is_err());
+    std::fs::write(store.home.join("作品/frame.png"), b"available original").unwrap();
+    store
+        .set_final(&script_id, first, "image", Some(&job.id))
+        .unwrap();
+    assert!(store
+        .set_final(&script_id, second, "image", Some(&job.id))
+        .is_err());
+    assert!(store
+        .set_final(&script_id, first, "video", Some(&job.id))
+        .is_err());
+    let mut edit = story;
+    edit["scenes"] = scenes.clone();
+    edit["scenes"][0]["id"] = json!(second);
+    assert!(store
+        .edit_script(&script_id, serde_json::from_value(edit.clone()).unwrap())
+        .is_err());
+    edit["scenes"] = json!([scenes[1], scenes[0]]);
+    store
+        .edit_script(&script_id, serde_json::from_value(edit).unwrap())
+        .unwrap();
+    assert_eq!(read()["finals"][first]["image"], job.id);
+    assert_eq!(read()["scenes"][1]["id"], first);
+}
+
 #[tokio::test]
 async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
     let legacy_hits = Arc::new(AtomicUsize::new(0));
@@ -70,7 +175,7 @@ async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
     let tenant = format!("{origin}/tenant/api/v3");
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let home = tempfile::tempdir().unwrap();
-    let studio = Studio::new(Store::new(home.path().into()).unwrap(), || {}).unwrap();
+    let studio = Studio::new(Store::new(home.path().into()).unwrap(), |_| {}).unwrap();
     studio
         .store
         .save_writer(WriterInput {
@@ -164,6 +269,40 @@ async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
     server.abort();
 }
 
+#[test]
+fn upgrading_preserves_legacy_storage_credentials_and_isolates_the_next_provider() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::new(temp.path().into()).unwrap();
+    let mut target = StorageTarget {
+        endpoint: "https://photos.example.org".into(),
+        bucket: "photos".into(),
+        region: "auto".into(),
+        access_key: "account".into(),
+        automatic: true,
+        ..Default::default()
+    };
+    store
+        .save_storage(target.clone(), "legacy-fixture-secret")
+        .unwrap();
+    let path = temp.path().join("settings.json");
+    let mut disk: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let previous = disk["storage"].as_object_mut().unwrap();
+    previous.remove("provider");
+    previous.remove("customDomain");
+    std::fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
+    let migrated = store.settings_view().unwrap();
+    assert_eq!(migrated["storage"]["provider"], "s3");
+    assert_eq!(migrated["hasStorageKey"], true);
+    target.provider = crate::preferences::StorageProvider::Aliyun;
+    target.region = "cn-hangzhou".into();
+    target.custom_domain = target.endpoint.clone();
+    assert!(store.save_storage(target, "").is_err());
+    assert_eq!(store.settings_view().unwrap()["hasStorageKey"], true);
+    assert_eq!(store.settings_view().unwrap()["storage"]["provider"], "s3");
+    let p = store.preferences().unwrap();
+    store.vault.forget(&p.storage_key);
+}
+
 #[tokio::test]
 async fn screenplay_json_is_editable_and_scoped_to_the_writer() {
     let scene = json!({"heading":"码头 · 清晨","action":"船离岸","dialogue":"",
@@ -186,7 +325,7 @@ async fn screenplay_json_is_editable_and_scoped_to_the_writer() {
     let base = format!("http://{}/v1", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let temp = tempfile::tempdir().unwrap();
-    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), || {}).unwrap();
+    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), |_| {}).unwrap();
     let input = |base: &str, key: &str| WriterInput {
         base: base.into(),
         model: "deepseek-v4-pro".into(),
@@ -245,7 +384,7 @@ async fn s3_upload_retries_the_original_under_the_same_key() {
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let temp = tempfile::tempdir().unwrap();
-    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), || {}).unwrap();
+    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), |_| {}).unwrap();
     let mut target = StorageTarget {
         endpoint,
         bucket: "pictures".into(),
@@ -254,6 +393,7 @@ async fn s3_upload_retries_the_original_under_the_same_key() {
         access_key: "fixture-id".into(),
         automatic: true,
         virtual_host: false,
+        ..Default::default()
     };
     studio
         .store

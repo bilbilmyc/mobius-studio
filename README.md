@@ -24,11 +24,27 @@
 
 在「剧本」写下故事构想并选择分镜数。生成后的剧本自动保存在 `Data/剧本`，可以随时打开、编辑并保存。每镜包含场景、动作、台词、图片和视频提示词。点击「用于生图」或「用于视频」可将该镜提示词带入创作台，确认参数后再生成。
 
+从分镜发起的任务会记住所属镜头。打开分镜的「关联作品」可以查看历次生成的图片和视频，各选一份定稿。「用定稿图生视频」会同时填入首帧和这一镜的视频提示词。后续生成的视频仍归入同一镜头。
+
+## 作品库与性能
+
+点击「生成图片」或「生成视频」后，这条任务会带着当时的提示词、参数和素材转入后台。可以立刻改写下一条，切换图片和视频，或去编辑剧本。任意页面右上角的「后台任务」显示进行中的数量，点开可按状态查看进度、结果和需要处理的任务。任务完成后原文件自动进入作品库。查看某条任务后点「继续创作」即可回到当前草稿。
+
+窗口最小化时仍会处理任务。完全退出后，本地查询和下载会在下次打开时按已保存的服务商编号或下载地址继续；提交结果待核实的记录会留在「待处理」中，供核对服务商记录。
+
+作品库支持按提示词、模型、任务编号或分镜名称搜索，多段关键词用空格分隔。可以同时筛选媒体类型与任务状态。「待处理」收集失败、待恢复和提交待核实的记录。结果超过 60 条会分页，搜索会查找整个作品库。批量导出支持跨页勾选，全选覆盖所有符合筛选条件且可导出的图片。导出进度会显示已保存的张数，允许在当前图片完成后停止。
+
+浏览作品时会按可见范围读取缩略图。图片和视频封面的长边最多 384 像素，缓存在数据目录下，重开后可以复用。打开作品预览时读取原件。
+
+「设置 → 性能」可查看当前 WebView 识别到的图形设备。自动模式适量预读缩略图，按尺寸导出走 Rust 的 Lanczos3 缩放。省电模式只读可见缩略图，并减少动画。高性能模式会预读相邻卡片，使用硬件 WebGL 2 缩放和裁切图片，单张和批量导出共用同一条路径。显卡不可用、尺寸超出显卡限制、原图为高位深或带独立 ICC 配置时会转交 CPU。导出结果会显示实际使用的处理器。云端生图和生视频的速度由所选服务决定。
+
 ## 对象存储
 
-「设置 → 对象存储」支持 S3 兼容的 PutObject 接口。填写服务 Endpoint、Bucket、签名区域、Access Key ID 和 Secret Access Key，可选对象前缀和寻址方式。Cloudflare R2 使用账户的 S3 Endpoint 和区域 `auto`。MinIO 通常选路径式寻址。仅本机回环地址可使用 HTTP。
+「设置 → 对象存储」可选择阿里云 OSS、腾讯云 COS、火山引擎 TOS、Amazon S3 或其他 S3 兼容服务。选择品牌后填写桶名、地域和凭据，应用会生成对应的服务地址。阿里云使用 OSS V4 签名，可填写已绑定到桶的自定义域名。腾讯云填写带 APPID 的完整桶名，例如 `photos-1250000000`。火山引擎使用该地域的 S3 专用端点。Amazon S3 支持中国区域端点。[阿里云 OSS 签名](https://help.aliyun.com/zh/oss/developer-reference/recommend-to-use-signature-version-4) · [腾讯云 COS 配置](https://cloud.tencent.com/document/product/436/41284) · [火山引擎 TOS 配置](https://docs.volcengine.com/docs/torch-object-storage/accessing-tos-using-awss-3-sdk?lang=zh) · [AWS 区域端点](https://docs.aws.amazon.com/general/latest/gr/s3.html)
 
-默认在作品预览或作品库中手动上传。勾选「生成图片后自动上传」后，新生成的图片会先保存到本地，再按“前缀/任务编号.扩展名”上传原图。作品中显示 `s3://` 存储位置。上传中断或被拒绝时可重试，重试沿用同一对象名。桶的访问权限由存储服务管理。
+其他服务可自定义 Endpoint、签名区域和寻址方式。Cloudflare R2 使用账户的 S3 Endpoint 和区域 `auto`。MinIO 通常选路径式寻址。仅本机回环地址可使用 HTTP。升级前已经保存的自定义 S3 设置会继续使用原地址和凭据。
+
+默认在作品预览或作品库中手动上传。勾选「生成图片后自动上传」后，新生成的图片会先保存到本地，再按“前缀/任务编号.扩展名”上传原图。作品中显示对应品牌的存储位置。上传中断或被拒绝时可重试，重试沿用同一对象名。桶的访问权限由存储服务管理。
 
 ## 官网工作台
 
@@ -36,7 +52,7 @@
 
 内置的官网目录包含 3 个图片模板和 9 个视频及视频处理模板。MiniMax H3、各版本 Seedance、视频超分和去字幕分别显示对应的画幅、分辨率、时长、音频、水印和参考素材。可选择文件或拖入对应素材栏，并在同类素材间调整顺序。首尾帧模式按第一张和第二张排列。队列与预计金额随可用选项变化，官网结算以提交时的价格为准。[官网模板目录](https://queueapi.vylai.com/comfyui-web/v3/home?department_code=rh&page=1&page_size=20)
 
-提示词框自动换行和增高，高度达到上限后在框内滚动。「展开编辑」适合多段脚本。Ctrl / ⌘ + Enter 确认长文，Esc 取消本次编辑。创作台的同一快捷键用于提交当前设置。在「作品库」可预览或播放原文件、复用参数，也可把已生成的图片用作视频首帧。
+提示词框自动换行和增高，高度达到上限后在框内滚动。「展开编辑」适合多段脚本。Ctrl / ⌘ + Enter 确认长文，Esc 取消本次编辑。创作台的同一快捷键用于提交当前设置。等待画布会显示任务当前处于提交、生成或本地保存阶段。图片完成后，可在「作品库」点击卡片上的「图生视频」，或右键图片选择同名操作。创作台会打开视频页并预填首帧，确认参数后再点击「生成视频」。
 
 ## 模型厂商与第三方中转站
 
@@ -51,6 +67,9 @@
 | 万相 | 图片生成与多图编辑、文生视频、单首帧视频及首尾帧视频。首帧和首尾帧模型选用对应的独立协议。万相 2.2 首尾帧模型的时长为 5 秒。根地址填写服务商或百炼工作空间提供的地址。[万相图片](https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference) · [万相首尾帧](https://help.aliyun.com/zh/model-studio/legacy-image-to-video-by-first-and-last-frame-api-reference) |
 | 火山方舟 | 文生视频、首帧、首尾帧、多素材参考。首尾帧分别发送 `first_frame` 和 `last_frame` 角色，参考模式按类别发送图片、视频和音频。具体限制与模型版本有关。[方舟创建任务](https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh) |
 | 自定义图片 / 视频 | 一个连接可配置文字生成以及多个带素材的创作方式。每种方式可独立配置提交路径、JSON 或 multipart 请求体。同一连接共用响应字段、认证和可选轮询。响应结构不同的接口可建为独立连接。 |
+| ComfyUI 本地生图 | 连接正在运行的 ComfyUI，读取已安装的 checkpoint，支持文生图和单张本地参考图重绘。 |
+
+本地生成需先在 ComfyUI 安装可配合标准 CheckpointLoaderSimple、CLIP、KSampler 和 VAE 节点使用的 SD 1.x 或 SDXL checkpoint，并启动服务。在莫比环选择 ComfyUI 协议，填入服务根地址（本机默认 `http://127.0.0.1:8188`），点「获取模型列表」选择模型。可调采样步数、CFG、种子、反向提示词和重绘强度。本地推理使用的设备由 ComfyUI 自己的启动配置决定。模型权重由该服务管理。[ComfyUI 服务端接口](https://docs.comfy.org/development/comfyui-server/comms_routes)
 
 ### 配置带素材的中转接口
 
@@ -84,6 +103,8 @@
 
 编辑连接时可勾选「新填的 Key 仅在本次打开期间使用」，关闭程序即释放本次输入的凭据。每条连接的凭据按服务根地址隔离。任务已取得远端编号后可在重新打开时继续查询，下载中断可从记录中恢复。提交中断但未收到编号时，状态显示「提交待核实」，可以先到服务商核对记录。
 
+等待画布从任务创建时开始计时，并显示服务商返回的排队或生成状态。OpenAI 兼容视频接口返回有效的整数进度时也会显示百分比。已有编号的任务遇到短暂断网、限流或服务暂时不可用时，客户端会按 5、10、20 秒的间隔重查同一编号。服务商要求更久的等待时间时，会按该时间查询，重开应用也会保留等待期限。连续三次重试仍失败时，可在作品库「待处理」中打开任务并点「恢复任务」。[视频任务进度字段](https://developers.openai.com/api/docs/guides/video-generation)
+
 ## 开发、构建与测试
 
 准备 Node.js 24、Rust stable，以及当前平台的 Tauri 原生编译依赖。Windows 使用 MSVC 和 Windows SDK，Linux 使用 GTK 3 与 WebKitGTK 4.1 开发包，macOS 使用 Xcode Command Line Tools。[Tauri 开发环境](https://v2.tauri.app/start/prerequisites/)
@@ -104,7 +125,11 @@ npm run installer -- --arch=arm64
 bash tests/macos-dmg.sh
 ```
 
-在 GitHub Actions 手动运行「macOS Apple Silicon DMG」可得到 `Mobius-macOS-arm64` 构件。流程检查 DMG 完整性、Mach-O 架构、最低系统版本及本机签名，将应用复制到临时 Applications 目录并卸载磁盘映像，再启动应用并等待真实 WebView 成功调用本地数据接口。自测还会恢复一条图片下载任务，使用临时钥匙串凭据向本机 S3 测试服务上传原图，校验签名与文件内容。构件采用 ad-hoc 签名。
+在 Windows 或 Apple Silicon Mac 上运行 `npm run test:render`，可以用真实桌面 WebView 把同一张内置样图用两种模式各导出三次至 3840 × 2160，并对比耗时、主进程内存和输出像素。运行 `npm run test:render -- --require-gpu` 会要求高性能模式确实走硬件渲染。报告中的主进程内存不包含 WebView 子进程与显存。Mac 工作流也会执行这一画质与回退验证。
+
+在已准备好 Node.js 24、Rust 和 Xcode Command Line Tools 的 M 系列 Mac 上，进入源码目录运行 `bash tests/macos-local.sh`，即可构建当前版本的 DMG，验证安装后的应用，再运行原生回归和硬件 GPU 画质对照。DMG 与 `macOS-render-4k.json` 均保存在 `dist`。
+
+在 GitHub Actions 手动运行「macOS Apple Silicon DMG」可得到 `Mobius-macOS-arm64` 构件。流程检查 DMG 完整性、Mach-O 架构、最低系统版本及本机签名，将应用复制到临时 Applications 目录并卸载磁盘映像，再启动应用并等待真实 WebView 成功调用本地数据接口。自测会同时恢复两条图片下载任务，让其中一条在另一条等待时先完成，再逐一校验本地原图、临时钥匙串凭据生成的 S3 签名和上传内容。构件采用 ad-hoc 签名。
 
 仓库提供可手动运行的桌面构建工作流。Windows 打包后可运行 `npm run test:desktop`，需要 FFmpeg。它使用独立的临时数据目录，在真实 WebView 中测试官网模板、文字和带图模式、二进制表单、模型参数、首尾帧顺序、任务恢复和视频播放。Rust 测试覆盖凭据隔离、旧数据路径、参数校验、导出尺寸和中断恢复。Linux 的原生 WebKitGTK 回归使用 `tests/linux-webview.py`、WebKitWebDriver 和一个本地 H.264 样片，验证带认证的首尾帧请求、HTTP 分段读取与视频解码。手动构建工作流包含这两组桌面回归。
 

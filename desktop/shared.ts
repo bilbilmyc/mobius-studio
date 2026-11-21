@@ -5,6 +5,7 @@ export type Kind = 'image' | 'video' | 'audio'
 export type MediaKind = 'image' | 'video'
 export type Value = string | number | boolean
 export type Protocol =
+  | 'comfy-image'
   | 'rh-image'
   | 'rh-video'
   | 'openai-image'
@@ -295,7 +296,7 @@ export interface EditProfile {
   relay?: RelayMap
 }
 export interface ModelLookup {
-  source: 'writer' | 'connection'
+  source: 'writer' | 'connection' | 'comfy'
   base: string
   key: string
   id?: string
@@ -326,6 +327,7 @@ export interface Job {
   CreatedUtc: string
 }
 export interface JobView {
+  shot?: ShotLink | null
   cloud?: { status: 'pending' | 'uploading' | 'saved' | 'failed'; uri: string; endpoint: string; detail: string } | null
   mediaUrl?: string
   settings?: Record<string, Value>
@@ -343,12 +345,14 @@ export interface JobView {
   status: string
   detail: string
   remoteId: string
+  retryAt?: number | null
   created: number
   file: boolean
   mediaPath?: string
   site?: { config: Record<string, Value>; priority: number }
 }
 export interface Start {
+  shot?: ShotLink
   profileId: string
   model?: string
   kind: MediaKind
@@ -371,6 +375,8 @@ export interface Reuse {
   assets: Picked[]
 }
 export interface StorageTarget {
+  provider: 'aliyun' | 'tencent' | 'volcengine' | 'aws' | 's3'
+  customDomain: string
   endpoint: string
   bucket: string
   region: string
@@ -380,11 +386,13 @@ export interface StorageTarget {
   automatic: boolean
 }
 export interface Integrations {
+  performance: PerformanceMode
   writer: { base: string; model: string; hasKey: boolean }
   storage: StorageTarget
   hasStorageKey: boolean
 }
 export interface Scene {
+  id: string
   heading: string
   action: string
   dialogue: string
@@ -396,11 +404,15 @@ export interface Screenplay {
   scenes: Scene[]
 }
 export interface Script extends Screenplay {
+  finals: Record<string, Partial<Record<MediaKind, string>>>
   id: string
   created: number
   brief: string
   model: string
 }
+export interface ShotLink { scriptId: string; sceneId: string; label: string }
+export type PerformanceMode = 'auto' | 'eco' | 'performance'
+export interface ExportSize { width: number; height: number; fit: 'crop' | 'contain' }
 export const defaultConfig = (t: Template): Record<string, Value> =>
   Object.fromEntries(t.Fields.map((f) => [f.Key, f.Default]))
 export function slots(t: Template, config: Record<string, Value>): Slot[] {
@@ -449,11 +461,24 @@ export const statusLabels: Record<string, string> = {
   uncertain: '提交待核实',
   failed: '失败',
 }
+export type JobStatusGroup = 'active' | 'attention' | 'done'
+
+export function jobStatusGroup(status: string): JobStatusGroup {
+  if (status === 'done') return 'done'
+  if (['preparing', 'submitting', 'waiting', 'downloading'].includes(status)) return 'active'
+  return 'attention'
+}
+
 export interface Bridge {
+  exportSized(id: string, size: ExportSize, choose: boolean): Promise<{ path: string | null; engine: string; fallback: string }>
+  thumbnail(id: string): Promise<string>
+  savePerformance(mode: PerformanceMode): Promise<void>
+  setFinal(scriptId: string, sceneId: string, kind: MediaKind, jobId: string | null): Promise<Script>
   settings(): Promise<Integrations>
   saveWriter(input: { base: string; model: string; key: string }): Promise<void>
   saveStorage(target: StorageTarget, secret: string): Promise<void>
   uploadImage(id: string): Promise<void>
+  copyImage(id: string, link: boolean): Promise<void>
   scripts(): Promise<Script[]>
   generateScript(brief: string, count: number): Promise<Script>
   editScript(id: string, story: Screenplay): Promise<Script>
@@ -465,6 +490,7 @@ export interface Bridge {
   link(kind: Kind, url: string): Promise<Picked>
   preview(item: Picked): Promise<string | null>
   state(): Promise<State>
+  changedJobs(ids: string[]): Promise<JobView[]>
   save(input: EditProfile): Promise<string>
   remove(id: string): Promise<void>
   models(input: EditProfile): Promise<string[]>
@@ -478,7 +504,7 @@ export interface Bridge {
   open(id: string): Promise<void>
   folder(): Promise<void>
   web(prompt: string): Promise<void>
-  changed(cb: () => void): () => void
+  changed(cb: (id?: string) => void): () => void
 }
 declare global {
   interface Window {

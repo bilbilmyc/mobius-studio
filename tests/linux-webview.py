@@ -131,12 +131,15 @@ def main():
                 raise AssertionError("A request without the session token should fail")
             except urllib.error.HTTPError as refused:
                 assert refused.code==404
-            js("document.querySelectorAll('.rail nav button')[1].click()")
+            js("Array.from(document.querySelectorAll('.rail nav button')).find(b => b.textContent.trim() === '作品库').click()")
             for _ in range(80):
-                if js("return !!document.querySelector('.card video')"):
+                if js("""const card = Array.from(document.querySelectorAll('.card')).find(b => b.querySelector('b')?.textContent === 'Linux 首尾帧');
+                         if (!card) return false;
+                         card.dispatchEvent(new MouseEvent('dblclick', {bubbles:true})); return true;"""):
                     break
                 time.sleep(.1)
-            js("document.querySelector('.card').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))")
+            else:
+                raise AssertionError("The generated video did not appear in the work library")
             for _ in range(100):
                 if js("return document.querySelector('.canvas video')?.readyState>=1"):
                     break

@@ -14,8 +14,9 @@ export function CloudSave({ job, settings, configure, report }: Props) {
   const copy = job.cloud, target = settings?.storage
   const working = busy || copy?.status === 'pending' || copy?.status === 'uploading'
   const prefix = target?.prefix ? target.prefix + '/' : ''
+  const scheme = { aliyun: 'oss', tencent: 'cos', volcengine: 'tos', aws: 's3', s3: 's3' }[target?.provider ?? 's3']
   const savedHere = copy?.status === 'saved' && copy.endpoint === target?.endpoint &&
-    copy.uri.startsWith(`s3://${target?.bucket}/${prefix}${job.id}.`)
+    copy.uri.startsWith(`${scheme}://${target?.bucket}/${prefix}${job.id}.`)
   return <div className="cloud-save">
     {copy?.status === 'saved' && <span className="cloud-location">已上传 · {copy.uri}</span>}
     {copy?.status === 'failed' && <span role="status" className="error">{copy.detail}</span>}

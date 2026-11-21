@@ -18,16 +18,24 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+fn retry_deadline(delay: Duration) -> i64 {
+    let ms = i64::try_from(delay.as_millis()).unwrap_or(i64::MAX);
+    Utc::now().timestamp_millis().saturating_add(ms)
+}
+
 pub struct Studio {
     pub store: Store,
     pub http: reqwest::Client,
     pub(crate) cloud_transfer: tokio::sync::Mutex<()>,
     active: Mutex<HashSet<String>>,
-    notify: Box<dyn Fn() + Send + Sync>,
+    notify: Box<dyn Fn(Option<&str>) + Send + Sync>,
     pub poll: Duration,
 }
 impl Studio {
-    pub fn new(store: Store, notify: impl Fn() + Send + Sync + 'static) -> Result<Self> {
+    pub fn new(
+        store: Store,
+        notify: impl Fn(Option<&str>) + Send + Sync + 'static,
+    ) -> Result<Self> {
         Ok(Self {
             store,
             http: provider::client()?,
@@ -38,13 +46,16 @@ impl Studio {
         })
     }
     pub fn changed(&self) {
-        (self.notify)()
+        (self.notify)(None)
+    }
+    pub(crate) fn job_changed(&self, id: &str) {
+        (self.notify)(Some(id));
     }
     fn update(&self, j: &mut Job, status: &str, detail: &str) -> Result<()> {
         j.status = status.into();
         j.detail = detail.into();
         self.store.save_job(j)?;
-        self.changed();
+        self.job_changed(&j.id);
         Ok(())
     }
     pub fn prepare(&self, i: Start) -> Result<Job> {
@@ -69,6 +80,10 @@ impl Studio {
         }
         let assets = self.store.assets(&i.assets)?;
         let mut j = Job {
+            shot: i
+                .shot
+                .map(|link| self.store.resolve_shot(link))
+                .transpose()?,
             id: id(),
             profile_id: p.id,
             profile_name: p.name,
@@ -246,8 +261,7 @@ impl Studio {
                 }
             }
         }
-        let mut result = Output::Pending;
-        if submit {
+        let submitted = if submit {
             let mut uploaded = json!({});
             if let Some(options) = j.site_options.as_mut() {
                 for a in &mut options.assets {
@@ -312,27 +326,79 @@ impl Studio {
                 ));
             }
             self.update(j, "submitting", "正在向所选服务提交。")?;
-            result = provider::submit(&self.http, j, &key, uploaded, &inputs).await?;
+            let result = provider::submit(&self.http, j, &key, uploaded, &inputs).await?;
             if let Output::Ticket(id) = &result {
                 j.remote_id = Some(id.clone());
                 self.store.save_job(j)?
             }
-        }
-        if j.remote_id.is_some() {
-            self.update(j, "waiting", "已取得任务编号，正在查询进度。")?;
-            loop {
-                result = provider::query(&self.http, j, &key).await?;
-                if !matches!(result, Output::Pending) {
-                    break;
-                }
-                tokio::time::sleep(self.poll).await;
-            }
-        }
+            Some(result)
+        } else {
+            None
+        };
+        let result = if j.remote_id.is_some() {
+            self.poll_result(j, &key).await?
+        } else {
+            submitted.ok_or_else(|| Fault::known("缺少可恢复的任务编号或结果地址。"))?
+        };
         if let Output::Failed(msg) = result {
             self.update(j, "failed", &msg)?;
             return Ok(());
         }
         self.finish(j, result, &key).await
+    }
+    async fn poll_result(&self, j: &mut Job, key: &str) -> provider::Reply<Output> {
+        const RETRIES: u32 = 3;
+        if j.retry_at.is_none() {
+            self.update(j, "waiting", "已取得任务编号，正在查询进度。")?;
+        } else if j.status != "waiting" {
+            self.update(j, "waiting", "已保留原任务，将在等待期结束后继续查询。")?;
+        }
+        let mut failures = 0;
+        loop {
+            // A restart during a provider cooldown must not cause an early request.
+            let recovering = j.retry_at.is_some();
+            if let Some(at) = j.retry_at.take() {
+                loop {
+                    let remaining = at.saturating_sub(Utc::now().timestamp_millis());
+                    if remaining <= 0 {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(remaining.min(60_000) as u64)).await;
+                }
+            }
+            match provider::query(&self.http, j, key).await {
+                Ok(Output::Pending(detail)) => {
+                    failures = 0;
+                    if recovering || j.detail != detail {
+                        self.update(j, "waiting", &detail)?;
+                    }
+                    tokio::time::sleep(self.poll).await;
+                }
+                Ok(result) => return Ok(result),
+                Err(error) => {
+                    let Some(minimum) = error.poll_retry_after else {
+                        return Err(error);
+                    };
+                    if failures == RETRIES {
+                        if !minimum.is_zero() {
+                            j.retry_at = Some(retry_deadline(minimum));
+                        }
+                        return Err(Fault::known(format!(
+                            "进度查询已重试 {RETRIES} 次。可恢复原任务继续查询。{}",
+                            error.message.trim()
+                        )));
+                    }
+                    let delay = minimum.max(self.poll * (1 << failures));
+                    failures += 1;
+                    j.retry_at = Some(retry_deadline(delay));
+                    self.update(
+                        j,
+                        "waiting",
+                        &format!("进度查询暂时中断，将自动重试（{failures}/{RETRIES}）。"),
+                    )?;
+                }
+            }
+        }
     }
     async fn finish(
         &self,

@@ -29,7 +29,7 @@ export function ImageExport({
   w: number
   h: number
   close: () => void
-  saved: (s: string) => void
+  saved: (s: string, engine: string, fallback: string) => void
 }) {
   const initial = job.size.includes(':') ? job.size : aspect(w, h)
   const [[width, height], size] = useState(() => fitSize(w, h, initial)),
@@ -52,13 +52,13 @@ export function ImageExport({
     setBusy(true)
     fail('')
     try {
-      const path = await window.studio.exportFile(
+      const result = await window.studio.exportSized(
         job.id,
         { width, height, fit },
         choose,
       )
-      if (path) {
-        saved(path)
+      if (result.path) {
+        saved(result.path, result.engine, result.fallback)
         close()
       }
     } catch (e) {

@@ -6,11 +6,25 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fs;
+use std::{
+    collections::{BTreeMap, HashSet},
+    fs,
+};
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShotLink {
+    pub script_id: String,
+    pub scene_id: String,
+    #[serde(default)]
+    pub label: String,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Scene {
+    #[serde(default)]
+    id: String,
     heading: String,
     action: String,
     #[serde(default)]
@@ -28,6 +42,8 @@ pub struct Screenplay {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Script {
+    #[serde(default)]
+    finals: BTreeMap<String, BTreeMap<String, String>>,
     pub id: String,
     pub created: i64,
     pub model: String,
@@ -67,6 +83,69 @@ impl Screenplay {
 }
 
 impl Store {
+    fn script(&self, script_id: &str) -> Result<Script> {
+        if !valid_id(script_id) {
+            return Err("剧本编号无效。".into());
+        }
+        let mut script: Script = read(&self.home.join("剧本").join(format!("{script_id}.json")))?;
+        if script.id != script_id {
+            return Err("剧本文件与编号不符。".into());
+        }
+        for (index, scene) in script.story.scenes.iter_mut().enumerate() {
+            if scene.id.is_empty() {
+                scene.id = format!("{index:032x}");
+            }
+        }
+        Ok(script)
+    }
+
+    pub fn resolve_shot(&self, mut link: ShotLink) -> Result<ShotLink> {
+        let script = self.script(&link.script_id)?;
+        let index = script
+            .story
+            .scenes
+            .iter()
+            .position(|s| s.id == link.scene_id)
+            .ok_or("所选分镜已移除。")?;
+        link.label = format!("{} · 第 {} 镜", script.story.title, index + 1);
+        Ok(link)
+    }
+
+    pub fn set_final(
+        &self,
+        script_id: &str,
+        scene_id: &str,
+        media: &str,
+        job_id: Option<&str>,
+    ) -> Result<Script> {
+        let _guard = self.gate.lock().unwrap();
+        let mut script = self.script(script_id)?;
+        if !matches!(media, "image" | "video")
+            || !script.story.scenes.iter().any(|s| s.id == scene_id)
+        {
+            return Err("所选分镜或媒体类型无效。".into());
+        }
+        let finals = script.finals.entry(scene_id.into()).or_default();
+        if let Some(id) = job_id {
+            let job = self.job(id)?;
+            if job.status != "done"
+                || crate::model::kind(&job.protocol_id) != media
+                || !job
+                    .shot
+                    .as_ref()
+                    .is_some_and(|r| r.script_id == script_id && r.scene_id == scene_id)
+            {
+                return Err("请从这个分镜中选择已完成的作品。".into());
+            }
+            self.original(&job)?;
+            finals.insert(media.into(), id.into());
+        } else {
+            finals.remove(media);
+        }
+        self.save_script(&script)?;
+        Ok(script)
+    }
+
     pub fn scripts(&self) -> Result<Vec<Script>> {
         let dir = self.home.join("剧本");
         let entries = match fs::read_dir(&dir) {
@@ -78,7 +157,13 @@ impl Store {
         for entry in entries {
             let file = entry.map_err(|e| e.to_string())?.path();
             if file.extension().is_some_and(|s| s == "json") {
-                list.push(read::<Script>(&file)?);
+                list.push(
+                    self.script(
+                        file.file_stem()
+                            .and_then(|s| s.to_str())
+                            .ok_or("剧本文件名无效。")?,
+                    )?,
+                );
             }
         }
         list.sort_by_key(|s| std::cmp::Reverse(s.created));
@@ -95,12 +180,27 @@ impl Store {
         save(&dir.join(format!("{}.json", script.id)), script)
     }
 
-    pub fn edit_script(&self, id: &str, story: Screenplay) -> Result<Script> {
+    pub fn edit_script(&self, id: &str, mut story: Screenplay) -> Result<Script> {
         if !valid_id(id) {
             return Err("剧本编号无效。".into());
         }
         let _lock = self.gate.lock().unwrap();
-        let mut script: Script = read(&self.home.join("剧本").join(format!("{id}.json")))?;
+        let mut script = self.script(id)?;
+        let mut ids = HashSet::new();
+        for (index, scene) in story.scenes.iter_mut().enumerate() {
+            if scene.id.is_empty() {
+                scene.id = script
+                    .story
+                    .scenes
+                    .get(index)
+                    .map(|s| s.id.clone())
+                    .unwrap_or_else(crate::model::id);
+            }
+            if !valid_id(&scene.id) || !ids.insert(scene.id.clone()) {
+                return Err("分镜编号无效或重复。".into());
+            }
+        }
+        script.finals.retain(|key, _| ids.contains(key));
         script.story = story;
         self.save_script(&script)?;
         Ok(script)
@@ -141,7 +241,7 @@ impl Studio {
         let content = choice["message"]["content"]
             .as_str()
             .ok_or("剧本模型没有返回正文。")?;
-        let story: Screenplay = serde_json::from_str(content.trim())
+        let mut story: Screenplay = serde_json::from_str(content.trim())
             .map_err(|_| "剧本模型返回的分镜格式不完整，请重试。")?;
         if story.scenes.len() != count {
             return Err(format!(
@@ -149,7 +249,11 @@ impl Studio {
                 story.scenes.len()
             ));
         }
+        for scene in &mut story.scenes {
+            scene.id = id();
+        }
         let script = Script {
+            finals: Default::default(),
             id: id(),
             created: chrono::Utc::now().timestamp_millis(),
             model: writer.model,

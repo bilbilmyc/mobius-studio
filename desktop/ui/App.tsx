@@ -23,13 +23,13 @@ import {
   statusLabels,
   templates,
   type JobView,
+  type ShotLink,
   type Integrations,
   type Kind,
   type MediaKind,
   type Picked,
   type ProfileView,
   type Slot,
-  type State,
   type Value,
 } from '../shared'
 import { Modal, Prompt } from './Editor'
@@ -40,6 +40,11 @@ import { Assets, addAssets, frameOrder } from './Assets'
 import { Settings, type SettingsSection } from './Settings'
 import { ScriptDesk } from './ScriptDesk'
 import { CloudSave } from './CloudSave'
+import { JobPreviewState } from './JobPreviewState'
+import { BackgroundTasks, jobAction } from './BackgroundTasks'
+import { WorkLibrary, defaultLibraryView } from './WorkLibrary'
+import { ComfyControls } from './ComfyControls'
+import { useStudioState } from './useStudioState'
 const example = {
   image:
     '一条带有细密刻纹的钛金属带扭转成莫比乌斯环，悬在黑曜石台面上。左侧冰蓝、右侧紫罗兰色的轮廓光勾出曲面，低机位产品摄影。',
@@ -86,10 +91,13 @@ const pageNames = {
   script: '剧本',
   settings: '设置',
 }
+const noJobs: JobView[] = []
 function App() {
-  const [data, setData] = useState<State>(),
-    [notice, say] = useState('就绪'),
+  const [notice, say] = useState('就绪'),
     [page, pageTo] = useState<Page>('create')
+  const {state: data, refresh} = useStudioState(say)
+  const jobs = data?.jobs ?? noJobs
+  const [lastSubmitted, setLastSubmitted] = useState('')
   const [kind, setKind] = useState<MediaKind>('image'),
     [service, services] = useState({ image: '@site', video: '@site' }),
     [selectedModels, setSelectedModels] = useState<Record<string, string>>({}),
@@ -97,7 +105,6 @@ function App() {
   const [prompts, setPrompts] = useState({ image: '', video: '' }),
     [drafts, setDrafts] = useState<Record<string, Draft>>({}),
     [shown, show] = useState(''),
-    [filter, filterTo] = useState('all'),
     [chosen, choose] = useState('')
   const [editor, edit] = useState<{
       official: boolean
@@ -112,9 +119,12 @@ function App() {
     duration?: number
   }>()
   const [exporting, setExporting] = useState(false)
+  const [unreadable, setUnreadable] = useState('')
   const [section, setSection] = useState<SettingsSection>('media')
   const [integrations, setIntegrations] = useState<Integrations>()
   const [openedScripts, setOpenedScripts] = useState(false)
+  const [libraryView, setLibraryView] = useState(defaultLibraryView)
+  const [shotBindings, setShotBindings] = useState<Partial<Record<MediaKind, ShotLink>>>({})
   const loadSettings = useCallback(async () => {
     try { setIntegrations(await window.studio.settings()) }
     catch (e) { say(msg(e)); throw e }
@@ -124,7 +134,8 @@ function App() {
     setSection(next)
     pageTo('settings')
   }
-  function shotPrompt(destination: MediaKind, value: string) {
+  function shotPrompt(destination: MediaKind, value: string, shot: ShotLink) {
+    setShotBindings(prev => ({ ...prev, [destination]: shot }))
     const key = service[destination] + destination
     const t = siteTemplate(tpl[key] ?? '')
     if (t && !t.Text) templateIds(old => ({ ...old, [key]: defaultTemplate(destination).Key }))
@@ -134,21 +145,7 @@ function App() {
     pageTo('create')
     say('已填入分镜提示词，确认参数后即可生成。')
   }
-  const lock = useRef(false),
-    revision = useRef(0)
-  const refresh = useCallback(async () => {
-    const n = ++revision.current
-    try {
-      const d = await window.studio.state()
-      if (n === revision.current) setData(d)
-    } catch (e) {
-      say(msg(e))
-    }
-  }, [])
-  useEffect(() => {
-    void refresh()
-    return window.studio.changed(() => void refresh())
-  }, [refresh])
+  const lock = useRef(false)
   const official = data?.official
   const externals = (data?.profiles ?? []).filter(
     (p) => !isSite(p.ProtocolId) || p.BaseUrl !== siteBase,
@@ -208,6 +205,12 @@ function App() {
   }
   const update = (patch: Partial<Draft>) =>
     setDrafts((old) => ({ ...old, [dk]: { ...(old[dk] ?? draft), ...patch } }))
+  function updateConfig(patch: Record<string, Value>) {
+    setDrafts(old => {
+      const current = old[dk] ?? draft
+      return { ...old, [dk]: { ...current, config: { ...current.config, ...patch } } }
+    })
+  }
   const mixedSite =
     native &&
     !currentTemplate.Video &&
@@ -219,6 +222,18 @@ function App() {
   const assets = draft.byMode[mode] ?? [],
     setAssets = (v: Picked[]) =>
       update({ byMode: { ...draft.byMode, [mode]: v } })
+  const frameMode = mode === 'default' ? draft.intent : mode
+  const firstFrame = kind === 'video' && (frameMode === 'first_frame' || frameMode === 'first_last') ? frameOrder(assets)[0] : undefined
+  const previewFrame = firstFrame?.role === 'last_frame' ? undefined : firstFrame
+  const [framePreview, setFramePreview] = useState<{ token: string; url: string }>()
+  useEffect(() => {
+    let active = true
+    if (previewFrame) void window.studio.preview(previewFrame).then(path => {
+      if (active && path) setFramePreview({ token: previewFrame.token, url: convertFileSrc(path) })
+    }).catch(() => {})
+    return () => { active = false }
+  }, [previewFrame?.token])
+  const frameUrl = previewFrame && framePreview?.token === previewFrame.token ? framePreview.url : ''
   const siteChoices = officialModes(currentTemplate)
   const intent = native
     ? siteChoices.includes(mode)
@@ -255,7 +270,7 @@ function App() {
       (proto === 'ark-video' && ['first_frame', 'first_last'].includes(mode)))
   function switchMode(next: string) {
     if (!native) {
-      update({ config: { ...draft.config, mode: next } })
+      updateConfig({ mode: next })
       return
     }
     const t = siteChoices.includes(next)
@@ -285,8 +300,8 @@ function App() {
     text = (s: string) => setPrompts((p) => ({ ...p, [kind]: s })),
     hasPrompt = !native || !!currentTemplate.Text
   const needsKey = native && !(profile ?? official)?.hasKey,
-    job = data?.jobs.find((j) => j.id === shown),
-    selected = data?.jobs.find((j) => j.id === chosen)
+    job = shown ? jobs.find((j) => j.id === shown) : undefined,
+    recent = lastSubmitted ? jobs.find((j) => j.id === lastSubmitted) : undefined
   const attempt = async (fn: () => Promise<unknown>) => {
     try {
       await fn()
@@ -356,6 +371,7 @@ function App() {
     markBusy(true)
     try {
       const next = await window.studio.start({
+        shot: shotBindings[kind],
         profileId: id,
         model: native ? undefined : selectedModel,
         kind,
@@ -367,17 +383,14 @@ function App() {
         priority: draft.priority,
         assets: paired ? frameOrder(assets) : assets,
       })
-      show(next)
-      choose(next)
-      say('已记录任务，可在作品库查看。')
-      await refresh()
+      setLastSubmitted(next)
+      say('已加入后台，可以继续创作。')
+      void refresh([next]).catch(e => say('任务已保存，读取进度时出错。' + msg(e)))
     } catch (e) {
       say(msg(e))
     } finally {
-      setTimeout(() => {
-        lock.current = false
-        markBusy(false)
-      }, 650)
+      lock.current = false
+      markBusy(false)
     }
   }
   useEffect(() => {
@@ -390,20 +403,22 @@ function App() {
         !document.querySelector('dialog[open]')
       ) {
         e.preventDefault()
-        void generate()
+        if (!e.repeat) void generate()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   })
-  function inspect(j: JobView) {
+  function inspect(j: JobView, keepDraft = false) {
+    setUnreadable('')
     show(j.id)
     choose(j.id)
-    setKind(j.kind)
+    if (!keepDraft) setKind(j.kind)
     pageTo('create')
   }
   async function reuse(j: JobView) {
     const record = await window.studio.reuse(j.id)
+    const sourceShot = j.shot ?? undefined
     const primary = isSite(j.protocol) && j.base === siteBase
     const p = primary
       ? undefined
@@ -443,6 +458,7 @@ function App() {
     }
     setKind(j.kind)
     services((o) => ({ ...o, [j.kind]: next }))
+    setShotBindings(o => ({ ...o, [j.kind]: sourceShot }))
     if (t) templateIds((o) => ({ ...o, [next + j.kind]: t.Key }))
     else if (p) setSelectedModels((o) => ({ ...o, [p.Id]: j.model }))
     setPrompts((o) => ({ ...o, [j.kind]: j.prompt }))
@@ -464,22 +480,21 @@ function App() {
     say('已恢复提示词、所选参数和素材顺序。')
   }
   async function continueWithImage(j: JobView, destination: MediaKind) {
-    const next = service[destination],
-      p = externals.find((p) => p.Id === next),
-      site = !p || isSite(p.ProtocolId)
     const wanted = destination === 'image' ? 'i2i' : 'first_frame'
-    const choices = p
-      ? [
-          ...(presets[p.ProtocolId].modes ?? []),
-          ...Object.keys(p.Relay?.workflows ?? {}),
-        ]
-      : []
-    const actual =
-      site || choices.includes(wanted)
-        ? wanted
-        : destination === 'video' && choices.includes('first_last')
-          ? 'first_last'
-          : ''
+    const candidates = externals.filter(p => mediaKind(p.ProtocolId) === destination)
+    let p = candidates.find(p => p.Id === service[destination])
+    function imageMode(connection?: ProfileView) {
+      if (!connection || isSite(connection.ProtocolId)) return wanted
+      const choices = [...(presets[connection.ProtocolId].modes ?? []), ...Object.keys(connection.Relay?.workflows ?? {})]
+      if (choices.includes(wanted)) return wanted
+      return destination === 'video' && choices.includes('first_last') ? 'first_last' : ''
+    }
+    const siteNeedsKey = (!p || isSite(p.ProtocolId)) && !(p ?? official)?.hasKey
+    if (destination === 'video' && (!imageMode(p) || siteNeedsKey)) {
+      p = candidates.find(c => c.hasKey && imageMode(c)) ??
+        (official?.hasKey ? undefined : candidates.find(c => !isSite(c.ProtocolId) && imageMode(c)) ?? (imageMode(p) ? p : undefined))
+    }
+    const actual = imageMode(p), site = !p || isSite(p.ProtocolId), next = p?.Id ?? '@site'
     if (!actual)
       throw Error(
         '当前生成服务未配置带图方式，请在创作台为该媒体类型选择支持参考图的连接。',
@@ -502,7 +517,8 @@ function App() {
     const old = drafts[key],
       cfg = t
         ? { ...defaultConfig(t), ...old?.config }
-        : { ...old?.config, mode: actual }
+        : { resolution: p?.Controls?.resolutions?.[0] ?? (p && presets[p.ProtocolId].resolutions?.[0]) ?? '',
+            ratio: p?.Controls?.ratios?.[0] ?? '', ...old?.config, mode: actual }
     if ('mode' in cfg) cfg.mode = actual
     const label = String(
         cfg.mode ??
@@ -513,11 +529,14 @@ function App() {
         p?.Controls?.sizes?.[0] ??
         (p ? presets[p.ProtocolId].sizes[0] : '')
     setKind(destination)
+    services(o => ({ ...o, [destination]: next }))
+    setShotBindings(o => ({ ...o, [destination]: j.shot ?? undefined }))
     if (t)
       templateIds((o) => ({ ...o, [(p?.Id ?? '@site') + destination]: t.Key }))
     setDrafts((o) => ({
       ...o,
       [key]: {
+        ...old,
         config: cfg,
         priority: old?.priority ?? 0,
         intent: actual,
@@ -527,11 +546,13 @@ function App() {
           p?.Relay?.seconds[0] ??
           (p ? presets[p.ProtocolId].seconds[0] : 0) ??
           0,
-        byMode: { ...old?.byMode, [label]: [a] },
+        byMode: { ...old?.byMode, [label]: actual === 'first_last'
+          ? [{ ...a, role: 'first_frame' }, ...frameOrder(old?.byMode[label] ?? []).filter(v => v.role === 'last_frame')] : [a] },
       },
     }))
     show('')
     pageTo('create')
+    requestAnimationFrame(() => document.getElementById('prompt')?.focus({ preventScroll: true }))
     say(
       destination === 'image'
         ? '已设为图生图的参考图片。'
@@ -540,9 +561,7 @@ function App() {
   }
   async function saved(savedId: string) {
     const isOfficial = editor?.official
-    const revisionAtSave = ++revision.current
-    const s = await window.studio.state()
-    if (revisionAtSave === revision.current) setData(s)
+    const s = await refresh()
     if (!isOfficial) {
       const p = s.profiles.find((x) => x.Id === savedId)
       if (p) {
@@ -567,8 +586,9 @@ function App() {
     job?.file && job.mediaPath
       ? (job.mediaUrl ?? convertFileSrc(job.mediaPath))
       : ''
+  const previewKey = job ? job.id + ':' + previewUrl : ''
   return (
-    <div className="shell">
+    <div className="shell" data-performance={integrations?.performance ?? 'auto'}>
       <aside className="rail">
         <div className="brand">
           <span className="brand-mark">∞</span>
@@ -599,24 +619,29 @@ function App() {
       <main>
         <header className="top">
           <h1>{pageNames[page]}</h1>
-          {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
-            {(['image', 'video'] as const).map(k =>
-              <button key={k} aria-pressed={kind === k} onClick={() => { setKind(k); show('') }}>
-                {k === 'image' ? '图片' : '视频'}</button>)}
-          </div>}
+          <div className="top-tools">
+            <BackgroundTasks jobs={jobs} inspect={j => inspect(j, true)} />
+            {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
+              {(['image', 'video'] as const).map(k =>
+                <button key={k} aria-pressed={kind === k} onClick={() => { setKind(k); show('') }}>
+                  {k === 'image' ? '图片' : '视频'}</button>)}
+            </div>}
+          </div>
         </header>
         {openedScripts && <ScriptDesk active={page === 'script'} writer={integrations?.writer}
-          configure={() => settingsPage('writer')} usePrompt={shotPrompt} />}
+          configure={() => settingsPage('writer')} usePrompt={shotPrompt} jobs={data?.jobs ?? []} inspect={inspect}
+          useFrame={async (image, motion) => { await continueWithImage(image, 'video'); setPrompts(o => ({ ...o, video: motion })) }} />}
         {page === 'create' ? (
           <div className="work">
             <section className="canvas-col">
               <div className="canvas">
                 {job ? (
-                  previewUrl ? (
+                  previewUrl && unreadable !== previewKey ? (
                     job.kind === 'video' ? (
                       <video
                         key={job.id}
                         src={previewUrl}
+                        onError={() => setUnreadable(previewKey)}
                         onLoadedMetadata={(e) => {
                           const v = e.currentTarget
                           setMetadata({
@@ -634,6 +659,7 @@ function App() {
                         key={job.id}
                         src={previewUrl}
                         alt="作品预览"
+                        onError={() => setUnreadable(previewKey)}
                         onLoad={(e) => {
                           const im = e.currentTarget
                           setMetadata({
@@ -645,19 +671,17 @@ function App() {
                       />
                     )
                   ) : (
-                    <div className="waiting">
-                      {statusLabels[job.status] ?? job.status}
-                    </div>
+                    <JobPreviewState job={job} retry={previewUrl && unreadable === previewKey ? () => setUnreadable('') : undefined} />
                   )
                 ) : (
                   <>
-                    <img src={orbit} alt="折光回环示例" />
+                    <img src={frameUrl || orbit} alt={frameUrl ? '视频首帧预览' : '折光回环示例'} />
                     <span className="badge">
-                      {kind === 'video' ? '镜头参考' : '图片示例'}
+                      {frameUrl ? '视频首帧' : kind === 'video' ? '镜头参考' : '图片示例'}
                     </span>
                     <div className="sample-caption">
                       <i />
-                      折光回环
+                      {frameUrl ? previewFrame?.name : '折光回环'}
                     </div>
                   </>
                 )}
@@ -667,11 +691,15 @@ function App() {
                   <b>
                     {job
                       ? job.prompt || siteTemplate(job.model)?.Name || '作品'
-                      : kind === 'video'
+                      : frameUrl ? '视频首帧已就绪' : kind === 'video'
                         ? '示例镜头提示词'
                         : '示例提示词'}
                   </b>
-                  {!job && (
+                  {job && <button className="link" onClick={() => {
+                    show('')
+                    document.getElementById('prompt')?.focus({ preventScroll: true })
+                  }}>继续创作</button>}
+                  {!job && !frameUrl && (
                     <button
                       className="link"
                       onClick={() => {
@@ -690,12 +718,12 @@ function App() {
                         siteTemplate(job.model)?.Name ?? job.profileName,
                         job.size,
                         job.seconds ? job.seconds + ' 秒' : '',
-                        job.detail,
+                        previewUrl && unreadable !== previewKey ? job.detail : '',
                         job.remoteId ? '任务 ' + job.remoteId : '',
                       ]
                         .filter(Boolean)
                         .join('　·　')
-                    : example[kind]}
+                    : frameUrl ? '填写镜头运动或画面变化，确认参数后即可生成视频。' : example[kind]}
                 </p>
                 {job && metadata?.id === job.id && (
                   <p className="media-info">
@@ -860,6 +888,8 @@ function App() {
                     {selectedModel} · {preset.title}
                   </small>
                 )}
+                {shotBindings[kind] && <div className="bound-shot"><span>{shotBindings[kind]!.label}</span>
+                  <button className="link" onClick={() => setShotBindings(o => ({ ...o, [kind]: undefined }))}>解除关联</button></div>}
                 {hasPrompt && (
                   <Prompt
                     value={prompt}
@@ -888,15 +918,7 @@ function App() {
                         <select
                           value={String(draft.config[f.Key])}
                           onChange={(e) =>
-                            update({
-                              config: {
-                                ...draft.config,
-                                [f.Key]:
-                                  f.Type === 'number'
-                                    ? Number(e.target.value)
-                                    : e.target.value,
-                              },
-                            })
+                            updateConfig({ [f.Key]: f.Type === 'number' ? Number(e.target.value) : e.target.value })
                           }
                         >
                           {f.Type === 'number'
@@ -977,12 +999,7 @@ function App() {
                                 draft.config.ratio ?? controls.ratios[0],
                               )}
                               onChange={(e) =>
-                                update({
-                                  config: {
-                                    ...draft.config,
-                                    ratio: e.target.value,
-                                  },
-                                })
+                                updateConfig({ ratio: e.target.value })
                               }
                             >
                               {controls.ratios.map((r) => (
@@ -1000,12 +1017,7 @@ function App() {
                               draft.config.resolution ?? resolutions[0],
                             )}
                             onChange={(e) =>
-                              update({
-                                config: {
-                                  ...draft.config,
-                                  resolution: e.target.value,
-                                },
-                              })
+                              updateConfig({ resolution: e.target.value })
                             }
                           >
                             {resolutions.map((r) => (
@@ -1021,12 +1033,7 @@ function App() {
                             aria-label="图片质量"
                             value={String(draft.config.quality ?? '')}
                             onChange={(e) =>
-                              update({
-                                config: {
-                                  ...draft.config,
-                                  quality: e.target.value,
-                                },
-                              })
+                              updateConfig({ quality: e.target.value })
                             }
                           >
                             <option value="">模型默认</option>
@@ -1065,12 +1072,7 @@ function App() {
                           type="checkbox"
                           checked={draft.config[f.Key] === true}
                           onChange={(e) =>
-                            update({
-                              config: {
-                                ...draft.config,
-                                [f.Key]: e.target.checked,
-                              },
-                            })
+                            updateConfig({ [f.Key]: e.target.checked })
                           }
                         />
                         {f.Label}
@@ -1093,9 +1095,7 @@ function App() {
                         spec={p}
                         value={draft.config['params.' + p.key] ?? p.default}
                         change={(v) =>
-                          update({
-                            config: { ...draft.config, ['params.' + p.key]: v },
-                          })
+                          updateConfig({ ['params.' + p.key]: v })
                         }
                       />
                     ))}
@@ -1105,13 +1105,16 @@ function App() {
                     slot={slot}
                     items={assets}
                     paired={paired}
-                    allowLink={proto !== 'openai-video'}
+                    allowLink={proto !== 'openai-video' && proto !== 'comfy-image'}
                     jobs={data?.jobs ?? []}
+                    performance={integrations?.performance ?? 'auto'}
                     add={(v, role) => attach(slot, v, role)}
                     change={setAssets}
                     report={say}
                   />
                 ))}
+                {proto === 'comfy-image' && <ComfyControls config={draft.config} imageInput={mode === 'i2i'}
+                  change={updateConfig} />}
                 {native && currentTemplate.Hint && (
                   <p className="help">{currentTemplate.Hint}</p>
                 )}
@@ -1130,18 +1133,26 @@ function App() {
                   )}
               </div>
               <div className="generate-foot">
+                {recent && <div className="latest-task" role="group" aria-label="最近提交的任务">
+                  <div aria-live="polite" aria-atomic="true">
+                    <small>最近提交 · {statusLabels[recent.status] || recent.status}</small>
+                    <span title={recent.prompt}>{recent.prompt || siteTemplate(recent.model)?.Name || recent.model}</span>
+                  </div>
+                  <button className="link" onClick={() => inspect(recent, true)}>{jobAction(recent)}</button>
+                </div>}
                 <small>
                   {native
                     ? quote(currentTemplate, draft.config, draft.priority)
+                    : proto === 'comfy-image' ? '由所连 ComfyUI 运行'
                     : '由所选服务商结算'}
                 </small>
                 <button
                   className="primary generate"
                   disabled={busy || !data}
-                  onClick={() => void generate()}
+                  onClick={e => { if (e.detail <= 1) void generate() }}
                 >
                   {busy
-                    ? '提交中…'
+                    ? '正在添加任务…'
                     : needsKey
                       ? '连接官网 Key'
                       : native && !hasPrompt
@@ -1154,74 +1165,9 @@ function App() {
             </aside>
           </div>
         ) : page === 'library' ? (
-          <section className="page-body">
-            <div className="section-bar">
-              <small>{data?.jobs.length ?? 0} 条本地任务</small>
-              <select
-                aria-label="筛选作品"
-                value={filter}
-                onChange={(e) => { filterTo(e.target.value); choose('') }}
-              >
-                <option value="all">全部作品</option>
-                <option value="image">仅图片</option>
-                <option value="video">仅视频</option>
-              </select>
-              <button
-                disabled={!selected}
-                onClick={() => selected && inspect(selected)}
-              >
-                查看所选任务
-              </button>
-              {selected && <CloudSave job={selected} settings={integrations} configure={() => settingsPage('storage')} report={say} />}
-            </div>
-            <div className="gallery">
-              {data?.jobs
-                .filter((j) => filter === 'all' || j.kind === filter)
-                .map((j) => (
-                  <button
-                    className={'card ' + (chosen === j.id ? 'selected' : '')}
-                    key={j.id}
-                    onClick={() => choose(j.id)}
-                    onDoubleClick={() => inspect(j)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') inspect(j)
-                    }}
-                  >
-                    <div className="thumb">
-                      {j.file && j.mediaPath ? (
-                        j.kind === 'image' ? (
-                          <img src={convertFileSrc(j.mediaPath)} alt="" />
-                        ) : (
-                          <video
-                            src={
-                              (j.mediaUrl ?? convertFileSrc(j.mediaPath)) +
-                              '#t=0.1'
-                            }
-                            muted
-                            preload="metadata"
-                          />
-                        )
-                      ) : j.kind === 'image' ? (
-                        '图片'
-                      ) : (
-                        '视频'
-                      )}
-                    </div>
-                    <b>
-                      {j.prompt || siteTemplate(j.model)?.Name || '视频处理'}
-                    </b>
-                    <em>{statusLabels[j.status]}</em>
-                    <small>
-                      {new Date(j.created).toLocaleDateString()} ·{' '}
-                      {siteTemplate(j.model)?.Name ?? j.profileName}
-                    </small>
-                  </button>
-                ))}
-            </div>
-            {!data?.jobs.some((j) => filter === 'all' || j.kind === filter) && (
-              <div className="empty">还没有这类作品</div>
-            )}
-          </section>
+          <WorkLibrary jobs={data?.jobs ?? []} view={libraryView} setView={setLibraryView}
+            selectedId={chosen} select={choose} inspect={inspect} makeVideo={j => continueWithImage(j, 'video')}
+            settings={integrations} configureStorage={() => settingsPage('storage')} report={say} attempt={attempt}/>
         ) : page === 'settings' ? (
           <Settings section={section} select={setSection} integrations={integrations} reload={loadSettings}
             profiles={externals} official={official} edit={(official, profile) => edit({ official, profile })}
@@ -1246,7 +1192,7 @@ function App() {
           w={metadata.w}
           h={metadata.h}
           close={() => setExporting(false)}
-          saved={(path) => say('已导出到 ' + path)}
+          saved={(path, engine, reason) => say(`${engine} 已导出到 ${path}${reason ? '（GPU 回退原因 ' + reason + '）' : ''}`)}
         />
       )}
       {editor && (

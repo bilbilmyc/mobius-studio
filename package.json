@@ -1,7 +1,7 @@
 {
   "name": "mobius-studio",
   "productName": "莫比环",
-  "version": "2.3.1",
+  "version": "2.5.0",
   "description": "本地图片与视频创作工作台",
   "private": true,
   "type": "module",
@@ -12,6 +12,7 @@
     "start": "tauri dev",
     "test": "npm run typecheck && cargo test --manifest-path src-tauri/Cargo.toml",
     "test:desktop": "node tests/desktop-ui.mjs",
+    "test:render": "npm run build && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --features custom-protocol,installed,render-benchmark --bin mobius-studio --example compare_exports && node tests/render-benchmark.mjs",
     "package": "node scripts/package.mjs",
     "installer": "node scripts/package.mjs --installer"
   },

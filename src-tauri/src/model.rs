@@ -241,6 +241,8 @@ pub struct SiteOptions {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct Job {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shot: Option<crate::screenplay::ShotLink>,
     pub id: String,
     pub profile_id: String,
     pub profile_name: String,
@@ -258,6 +260,8 @@ pub struct Job {
     pub status: String,
     pub detail: String,
     pub remote_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_at: Option<i64>,
     pub result_url: Option<String>,
     pub file_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -268,18 +272,20 @@ impl Job {
     pub fn time(&self) -> i64 {
         let s = self.created_utc.trim_matches('/');
         if let Some(s) = s.strip_prefix("Date(").and_then(|s| s.strip_suffix(')')) {
-            return s
-                .split(['+'])
-                .next()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
+            // The legacy offset is a display hint; the signed millisecond value already uses UTC.
+            let end = s
+                .char_indices()
+                .skip(1)
+                .find(|(_, c)| matches!(c, '+' | '-'))
+                .map_or(s.len(), |(index, _)| index);
+            return s[..end].parse().unwrap_or(0);
         }
         chrono::DateTime::parse_from_rfc3339(&self.created_utc)
             .map(|v| v.timestamp_millis())
             .unwrap_or(0)
     }
     pub fn view(&self, file: Option<&str>) -> Value {
-        json!({"id":self.id,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
+        json!({"id":self.id,"shot":self.shot,"profileId":self.profile_id,"profileName":self.profile_name,"protocol":self.protocol_id,"base":self.base_url,"model":self.model,"prompt":self.prompt,"size":self.size,"seconds":self.seconds,"kind":kind(&self.protocol_id),"status":self.status,"detail":self.detail,"remoteId":self.remote_id,"retryAt":self.retry_at,"created":self.time(),"file":file.is_some(),"mediaPath":file,"cloud":self.cloud,"settings":self.settings,"legacyFrame":self.reference.is_some(),"site":self.site_options.as_ref().map(|s|json!({"config":s.config,"priority":s.priority}))})
     }
 }
 #[derive(Clone, Deserialize)]
@@ -306,6 +312,7 @@ pub struct Picked {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Start {
+    pub shot: Option<crate::screenplay::ShotLink>,
     pub profile_id: String,
     pub model: Option<String>,
     pub kind: String,

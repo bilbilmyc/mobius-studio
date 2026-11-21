@@ -61,9 +61,23 @@ async fn serve(
     let Some(path) = path else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let origin = request
+        .headers()
+        .get(header::ORIGIN)
+        .filter(|v| {
+            matches!(
+                v.to_str(),
+                Ok("tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost")
+            )
+        })
+        .cloned();
     match ServeFile::new(path).oneshot(request).await {
         Ok(response) => {
             let mut r = response.map(Body::new);
+            if let Some(origin) = origin {
+                r.headers_mut()
+                    .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+            }
             r.headers_mut().insert(
                 header::CACHE_CONTROL,
                 header::HeaderValue::from_static("private, no-store"),

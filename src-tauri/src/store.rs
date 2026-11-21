@@ -315,6 +315,17 @@ impl Store {
         let p = self.home.join("作品").join(name);
         p.is_file().then_some(p)
     }
+    pub fn original(&self, j: &Job) -> Result<PathBuf> {
+        let file = self
+            .media(j)
+            .ok_or("原文件已移动")?
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        if !file.starts_with(self.home.join("作品")) {
+            return Err("作品路径无效。".into());
+        }
+        Ok(file)
+    }
     pub fn input(&self, s: &str) -> Result<PathBuf> {
         let normal = s.replace('\\', "/");
         let p = Path::new(&normal);

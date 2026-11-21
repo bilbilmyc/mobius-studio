@@ -1,0 +1,7 @@
+[
+  {"id":"aliyun","name":"阿里云 OSS","endpoint":"https://oss-{region}.aliyuncs.com","regions":["cn-hangzhou","cn-shanghai","cn-beijing","cn-shenzhen","cn-chengdu","cn-hongkong","ap-southeast-1"]},
+  {"id":"tencent","name":"腾讯云 COS","endpoint":"https://cos.{region}.myqcloud.com","regions":["ap-guangzhou","ap-shanghai","ap-beijing","ap-chengdu","ap-hongkong","ap-singapore"]},
+  {"id":"volcengine","name":"火山引擎 TOS","endpoint":"https://tos-s3-{region}.volces.com","regions":["cn-beijing","cn-shanghai","cn-guangzhou","ap-southeast-1"]},
+  {"id":"aws","name":"Amazon S3（AWS）","endpoint":"https://s3.{region}.amazonaws.com","chinaEndpoint":"https://s3.{region}.amazonaws.com.cn","regions":["us-east-1","us-west-2","ap-northeast-1","ap-southeast-1","eu-west-1","cn-north-1","cn-northwest-1"]},
+  {"id":"s3","name":"其他 S3 兼容服务","endpoint":"","regions":["us-east-1","auto"]}
+]

@@ -1,24 +1,45 @@
-import { useEffect, useState } from 'react'
-import type { Integrations, MediaKind, Scene, Script } from '../shared'
+import { useEffect, useMemo, useState } from 'react'
+import { statusLabels, siteTemplate, type Integrations, type JobView, type MediaKind, type Scene, type Script, type ShotLink } from '../shared'
 import { Modal } from './Editor'
 
 const sceneFields = {
   heading: '场景', action: '画面与动作', dialogue: '台词或旁白', imagePrompt: '图片提示词', videoPrompt: '视频提示词',
-} satisfies Record<keyof Scene, string>
+} satisfies Record<Exclude<keyof Scene, 'id'>, string>
 
 interface Props {
   active: boolean
   writer?: Integrations['writer']
   configure: () => void
-  usePrompt: (kind: MediaKind, prompt: string) => void
+  usePrompt: (kind: MediaKind, prompt: string, shot: ShotLink) => void
+  jobs: JobView[]
+  inspect: (job: JobView) => void
+  useFrame: (image: JobView, motion: string) => Promise<void>
 }
 
-export function ScriptDesk({ active, writer, configure, usePrompt }: Props) {
+export function ScriptDesk({ active, writer, configure, usePrompt, jobs, inspect, useFrame }: Props) {
   const [scripts, setScripts] = useState<Script[]>([]), [selected, select] = useState('')
   const [brief, setBrief] = useState(''), [count, setCount] = useState(4)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [editing, edit] = useState<Script | null>(null)
   const script = scripts.find(s => s.id === selected)
+  const takesByScene = useMemo(() => {
+    const result = new Map<string, JobView[]>()
+    for (const job of jobs) {
+      if (!job.shot || job.shot.scriptId !== selected) continue
+      const takes = result.get(job.shot.sceneId)
+      if (takes) takes.push(job)
+      else result.set(job.shot.sceneId, [job])
+    }
+    return result
+  }, [jobs, selected])
+  const [marking, setMarking] = useState(false)
+  async function mark(scene: Scene, job: JobView, remove: boolean) {
+    if (!script || marking) return
+    setMarking(true); setError('')
+    try { const saved = await window.studio.setFinal(script.id, scene.id, job.kind, remove ? null : job.id)
+      setScripts(all => all.map(s => s.id === saved.id ? saved : s))
+    } catch (e) { setError(String(e)) } finally { setMarking(false) }
+  }
   useEffect(() => {
     let current = true
     window.studio.scripts().then(all => {
@@ -62,17 +83,30 @@ export function ScriptDesk({ active, writer, configure, usePrompt }: Props) {
           <h2>{script.title}</h2></div><button onClick={() => edit(script)}>编辑剧本</button></div>
         <p className="story-brief">{script.brief}</p>
         <ol className="shot-list">
-          {script.scenes.map((scene, index) => <li key={index}>
+          {script.scenes.map((scene, index) => {
+            const link = {scriptId: script.id, sceneId: scene.id, label: `${script.title} · 第 ${index + 1} 镜`}
+            const takes = takesByScene.get(scene.id) ?? []
+            const finals = script.finals[scene.id] ?? {}
+            const first = takes.find(j => j.id === finals.image && j.file)
+            return <li key={scene.id}>
             <span className="shot-number" aria-label={`分镜 ${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
             <article><h3>{scene.heading}</h3><p>{scene.action}</p>
               {scene.dialogue && <blockquote>{scene.dialogue}</blockquote>}
               <details><summary>分镜提示词</summary><dl><dt>图片</dt><dd>{scene.imagePrompt}</dd><dt>视频</dt><dd>{scene.videoPrompt}</dd></dl></details>
               <div className="shot-actions">
-                <button onClick={() => usePrompt('image', scene.imagePrompt)}>用于生图</button>
-                <button onClick={() => usePrompt('video', scene.videoPrompt)}>用于视频</button>
+                <button onClick={() => usePrompt('image', scene.imagePrompt, link)}>用于生图</button>
+                <button onClick={() => usePrompt('video', scene.videoPrompt, link)}>用于视频</button>
+                {first && <button onClick={() => void useFrame(first, scene.videoPrompt).catch(e => setError(String(e)))}>用定稿图生视频</button>}
               </div>
+              {!!takes.length && <details className="shot-takes"><summary>关联作品 · {takes.length} 个版本</summary>
+                <ul>{takes.map((j, n) => <li key={j.id}>
+                  <button className="take-open" onClick={() => inspect(j)}>{j.kind === 'image' ? '图片' : '视频'} · {siteTemplate(j.model)?.Name ?? j.model}
+                    <small>版本 {takes.length - n} · {statusLabels[j.status] ?? j.status}</small></button>
+                  {j.status === 'done' && j.file && <button disabled={marking} aria-pressed={finals[j.kind] === j.id}
+                    onClick={() => void mark(scene, j, finals[j.kind] === j.id)}>{finals[j.kind] === j.id ? '已定稿' : '设为定稿'}</button>}
+                </li>)}</ul></details>}
             </article>
-          </li>)}
+          </li>})}
         </ol>
       </> : !busy && <div className="script-empty"><h2>写下你的第一个分镜</h2><p>从故事构想开始，生成场景、动作、台词，以及每个镜头的图片和视频提示词。</p></div>}
     </div>
@@ -91,7 +125,7 @@ function ScriptEditor({ initial, close, saved }: { initial: Script; close: () =>
     }}>
       <div className="dialog-body fields"><label>剧本标题<input required maxLength={200} value={title} onChange={e => setTitle(e.target.value)} /></label>
         {scenes.map((scene, index) => <fieldset key={index}><legend>分镜 {index + 1}</legend>
-          {(Object.keys(sceneFields) as (keyof Scene)[]).map(k =>
+          {(Object.keys(sceneFields) as (keyof typeof sceneFields)[]).map(k =>
             <label key={k}>{sceneFields[k]}<textarea rows={k === 'heading' ? 1 : 2} required={k !== 'dialogue'} maxLength={12000}
               value={scene[k]} onChange={e => setScenes(all => all.map((s, i) => i === index ? { ...s, [k]: e.target.value } : s))} /></label>)}
         </fieldset>)}

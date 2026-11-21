@@ -121,7 +121,7 @@ fn official_default_and_credentials_are_scoped() {
 #[test]
 fn connection_models_stay_scoped_and_jobs_keep_the_selected_model() {
     let temp = tempfile::tempdir().unwrap();
-    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), || {}).unwrap();
+    let studio = Studio::new(Store::new(temp.path().into()).unwrap(), |_| {}).unwrap();
     let mut edit = profile("https://one.example/v1", "openai-image");
     edit.models = Some(vec![
         " alternate ".into(),
@@ -172,6 +172,19 @@ fn validates_routes_and_legacy_files() {
     assert!(canonical_base("http://localhost:7777/v1").is_ok());
     let j:Job=serde_json::from_value(json!({"CreatedUtc":"/Date(1780000000000)/","ProtocolId":"rh-image","Reference":null,"ResultUrl":null})).unwrap();
     assert_eq!(j.time(), 1780000000000);
+    for (stamp, expected) in [
+        ("/Date(1780000000000-0700)/", 1780000000000),
+        ("/Date(-1000+0800)/", -1000),
+    ] {
+        assert_eq!(
+            Job {
+                created_utc: stamp.into(),
+                ..Default::default()
+            }
+            .time(),
+            expected
+        );
+    }
     assert_eq!(j.view(None)["kind"], "image");
     let temp = tempfile::tempdir().unwrap();
     let store = Store::new(temp.path().into()).unwrap();
@@ -186,7 +199,7 @@ fn validates_routes_and_legacy_files() {
 #[test]
 fn restart_preserves_uncertain_submissions_without_posting() {
     let temp = tempfile::tempdir().unwrap();
-    let studio = Arc::new(Studio::new(Store::new(temp.path().into()).unwrap(), || {}).unwrap());
+    let studio = Arc::new(Studio::new(Store::new(temp.path().into()).unwrap(), |_| {}).unwrap());
     let job = Job {
         id: id(),
         status: "submitting".into(),

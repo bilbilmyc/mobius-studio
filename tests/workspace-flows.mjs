@@ -26,10 +26,31 @@ export function verifyPut(req, url) {
 
 export function workspaceMock(png) {
   const uploads = []
-  let scripts = 0, writerLists = 0
+  let scripts = 0, writerLists = 0, ossUploads = 0
   return {
     uploads,
     handle(req, res, bytes) {
+      if (req.headers.authorization?.startsWith('OSS4-HMAC-SHA256 ')) {
+        assert.equal(req.method, 'PUT')
+        assert.deepEqual(bytes, png)
+        const dateTime = req.headers['x-oss-date'], date = dateTime.slice(0, 8)
+        const scope = date + '/cn-hangzhou/oss/aliyun_v4_request'
+        const claims = Object.fromEntries(req.headers.authorization.slice('OSS4-HMAC-SHA256 '.length).split(/,\s*/).map(pair => pair.split('=')))
+        assert.equal(claims.Credential, 'oss-fixture/' + scope)
+        assert.equal(claims.AdditionalHeaders, 'host')
+        assert.equal(req.headers['content-type'], 'image/png')
+        assert.equal(req.headers['x-oss-content-sha256'], 'UNSIGNED-PAYLOAD')
+        assert.match(decodeURIComponent(req.url), /^\/镜头\/夜 景\/[a-f\d]+\.png$/)
+        const headers = ['content-type', 'host', 'x-oss-content-sha256', 'x-oss-date'].map(name => name + ':' + req.headers[name] + '\n').join('')
+        const canonical = ['PUT', '/photos' + req.url, '', headers, 'host', 'UNSIGNED-PAYLOAD'].join('\n')
+        const signingKey = [date, 'cn-hangzhou', 'oss', 'aliyun_v4_request'].reduce((key, part) =>
+          createHmac('sha256', key).update(part).digest(), 'aliyun_v4oss-fixture-secret')
+        const toSign = ['OSS4-HMAC-SHA256', dateTime, scope, createHash('sha256').update(canonical).digest('hex')].join('\n')
+        assert.equal(claims.Signature, createHmac('sha256', signingKey).update(toSign).digest('hex'))
+        ossUploads++
+        res.end()
+        return true
+      }
       if (req.url === '/v1/models' && req.headers.authorization === 'Bearer writer-ui-fixture') {
         assert.equal(req.method, 'GET')
         writerLists++
@@ -65,6 +86,7 @@ export function workspaceMock(png) {
     check() {
       assert.equal(scripts, 1)
       assert.equal(writerLists, 2)
+      assert.equal(ossUploads, 1)
       assert.equal(uploads.length, 3)
       assert.equal(uploads[0], uploads[1])
       assert.notEqual(uploads[0], uploads[2])
@@ -131,6 +153,39 @@ export async function exerciseWorkspace({ page, base, oldId, shot, state, mock }
   assert.equal(await page.locator('#prompt').inputValue(), scene.imagePrompt)
   await button('设置').click()
   await button('对象存储').click()
+  const providers = page.getByLabel('存储服务商')
+  assert.deepEqual(await providers.locator('option').evaluateAll(options => options.map(o => o.value)), ['aliyun', 'tencent', 'volcengine', 'aws', 's3'])
+  assert.equal(await providers.inputValue(), 'aliyun')
+  await shot('对象存储服务商')
+  await providers.selectOption('tencent')
+  await page.getByLabel('存储桶名称（含 APPID）').fill('photos')
+  await page.getByLabel('SecretId').fill('test')
+  await page.getByLabel('SecretKey').fill('temporary-fixture')
+  await button('保存对象存储').click()
+  await page.getByText(/腾讯云 COS 需要带 APPID/).waitFor()
+  await providers.selectOption('volcengine')
+  assert.equal(await page.getByLabel('Secret Access Key').inputValue(), '')
+  await page.getByText('https://tos-s3-cn-beijing.volces.com').waitFor()
+  await providers.selectOption('aws')
+  await page.getByLabel('存储桶地域').fill('cn-northwest-1')
+  await page.getByText('https://s3.cn-northwest-1.amazonaws.com.cn').waitFor()
+  await providers.selectOption('aliyun')
+  await page.getByLabel('自定义域名').fill(new URL(base).origin)
+  await page.getByLabel('Bucket', { exact: true }).fill('photos')
+  await page.getByLabel('对象前缀').fill('镜头/夜 景')
+  await page.getByLabel('Access Key ID', { exact: true }).fill('oss-fixture')
+  await page.getByLabel('Secret Access Key').fill('oss-fixture-secret')
+  await button('保存对象存储').click()
+  await page.getByText('设置已保存。', { exact: true }).waitFor()
+  await button('作品库').click()
+  await page.getByLabel('筛选作品').selectOption('image')
+  await page.locator('.card').filter({ hasText: '旧版测试作品' }).click()
+  await button('存到对象存储').click()
+  await page.getByText('已上传 · oss://photos/镜头/夜 景/' + oldId + '.png').waitFor()
+  await button('设置').click()
+  await button('对象存储').click()
+  await providers.selectOption('s3')
+  assert.equal(await page.getByLabel('Access Key ID', { exact: true }).inputValue(), '')
   await page.getByLabel('Endpoint', { exact: true }).fill(new URL('/store', base).href)
   await page.getByLabel('Bucket', { exact: true }).fill('pictures')
   await page.getByLabel('签名区域').fill('auto')
@@ -156,9 +211,19 @@ export async function exerciseWorkspace({ page, base, oldId, shot, state, mock }
   await page.getByLabel('生成模型', { exact: true }).selectOption('local-image')
   await page.getByLabel('创作方式').selectOption('t2i')
   await button('生成图片').click()
+  await page.getByRole('group', { name: '最近提交的任务' }).filter({ hasText: scene.imagePrompt }).getByRole('button').click()
   await page.locator('.detail .cloud-location').waitFor()
   const saved = (await state()).jobs.find(j => j.prompt === scene.imagePrompt)
   assert.ok(saved.file && saved.cloud.status === 'saved')
+  const script = await page.evaluate(async ()=>(await window.studio.scripts())[0])
+  assert.equal(saved.shot.scriptId,script.id);assert.equal(saved.shot.sceneId,script.scenes[0].id)
+  await button('剧本').click();await page.getByText(/^关联作品 · /).first().click()
+  await button('设为定稿').click();await button('已定稿').waitFor()
+  await shot('分镜关联作品')
+  await button('用定稿图生视频').click()
+  await page.getByRole('img',{name:'视频首帧预览'}).waitFor()
+  assert.equal(await page.locator('#prompt').inputValue(),scene.videoPrompt)
+  await page.getByText('渡口，日出之前 · 第 1 镜',{exact:true}).waitFor()
   assert.equal(mock.uploads.at(-1), '/store/pictures/镜头/夜 景/' + saved.id + '.png')
   mock.check()
 }

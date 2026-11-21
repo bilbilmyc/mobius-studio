@@ -54,7 +54,7 @@ export function ConnectionEditor({
     [err, error] = useState(''),
     [busy, work] = useState(false)
   const catalog = useModelCatalog({
-    source: 'connection', id: p.id, base: p.base, key: p.key,
+    source: p.protocol === 'comfy-image' ? 'comfy' : 'connection', id: p.id, base: p.base, key: p.key,
     auth: isCustom(p.protocol) ? relay.auth : 'bearer',
   })
   const models = catalog.models ?? []
@@ -71,6 +71,7 @@ export function ConnectionEditor({
       protocol: id,
       base: presets[id].base || old.base,
       model: presets[id].model,
+      name: old.name || (id === 'comfy-image' ? '本机 ComfyUI' : ''),
       key: '',
     }))
     setRelay(defaultRelay(mediaKind(id)))
@@ -84,7 +85,7 @@ export function ConnectionEditor({
     try {
       const input = {
         ...p,
-        base: official ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
+        base: official || p.protocol === 'comfy-image' ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
         models: official ? undefined : additional.split(/[\n,，]+/).map((s) => s.trim()).filter(Boolean),
         controls: official ? undefined : controls,
         relay: isCustom(p.protocol) ? relay : undefined,
@@ -168,6 +169,7 @@ export function ConnectionEditor({
               )}
             </>
           )}
+          {p.protocol === 'comfy-image' && <p className="help">连接已启动的 ComfyUI，获取本机已安装的 SD 1.x 或 SDXL checkpoint。普通本机服务可将 Key 留空。</p>}
           <label>
             API Key
             <input

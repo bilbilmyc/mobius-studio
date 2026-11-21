@@ -1,10 +1,13 @@
 mod catalog;
+mod comfy;
 mod creation;
 mod export;
 mod inputs;
 mod jobs;
 mod model;
 mod object_storage;
+#[cfg(test)]
+mod poll_tests;
 mod preferences;
 #[cfg(target_os = "linux")]
 mod preview;
@@ -13,6 +16,7 @@ mod screenplay;
 mod store;
 #[cfg(test)]
 mod tests;
+mod thumbnails;
 mod vault;
 #[cfg(test)]
 mod workspace_tests;
@@ -27,11 +31,7 @@ use tauri_plugin_opener::OpenerExt;
 type Core<'a> = State<'a, Arc<Studio>>;
 
 fn view(app: &AppHandle, s: &Studio, j: &Job) -> Value {
-    let file = s
-        .store
-        .media(j)
-        .and_then(|p| p.canonicalize().ok())
-        .filter(|p| p.starts_with(s.store.home.join("作品")));
+    let file = s.store.original(j).ok();
     if let Some(p) = &file {
         let _ = app.asset_protocol_scope().allow_file(p);
     }
@@ -47,15 +47,35 @@ fn view(app: &AppHandle, s: &Studio, j: &Job) -> Value {
     view
 }
 #[tauri::command]
-fn studio_state(app: AppHandle, s: Core) -> Result<Value> {
-    let profiles = s.store.profiles()?;
-    let official = s.store.resolve("@site", "image")?;
-    let state = json!({"profiles":profiles.iter().map(|p|s.store.profile_view(p)).collect::<Vec<_>>(),"official":s.store.profile_view(&official),
-        "jobs":s.store.jobs()?.iter().map(|j|view(&app,&s,j)).collect::<Vec<_>>(),"keyStorage":vault::Vault::note()});
-    if std::env::var_os("MOBIUS_SMOKE_TEST").is_some() {
-        eprintln!("MOBIUS_WEBVIEW_READY");
-    }
-    Ok(state)
+async fn studio_state(app: AppHandle, s: Core<'_>) -> Result<Value> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let profiles = core.store.profiles()?;
+        let official = core.store.resolve("@site", "image")?;
+        let jobs = core.store.jobs()?.iter().map(|j|view(&app,&core,j)).collect::<Vec<_>>();
+        let state = json!({
+            "profiles": profiles.iter().map(|p|core.store.profile_view(p)).collect::<Vec<_>>(),
+            "official": core.store.profile_view(&official), "jobs": jobs, "keyStorage": vault::Vault::note(),
+        });
+        if std::env::var_os("MOBIUS_SMOKE_TEST").is_some() {
+            eprintln!("MOBIUS_WEBVIEW_READY");
+        }
+        Ok(state)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn changed_jobs(app: AppHandle, s: Core<'_>, ids: Vec<String>) -> Result<Vec<Value>> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ids.iter()
+            .map(|id| {
+                let job = core.store.job(id)?;
+                Ok(view(&app, &core, &job))
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn integration_settings(s: Core) -> Result<Value> {
@@ -86,6 +106,25 @@ async fn upload_image(s: Core<'_>, id: String) -> Result<()> {
 #[tauri::command]
 fn list_scripts(s: Core) -> Result<Vec<screenplay::Script>> {
     s.store.scripts()
+}
+#[tauri::command]
+fn set_final(
+    s: Core,
+    script_id: String,
+    scene_id: String,
+    kind: String,
+    job_id: Option<String>,
+) -> Result<screenplay::Script> {
+    s.store
+        .set_final(&script_id, &scene_id, &kind, job_id.as_deref())
+}
+#[tauri::command]
+fn save_performance(s: Core, mode: preferences::PerformanceMode) -> Result<()> {
+    s.store.save_performance(mode)
+}
+#[tauri::command]
+fn performance_mode(s: Core) -> Result<preferences::PerformanceMode> {
+    Ok(s.store.preferences()?.performance)
 }
 #[tauri::command]
 async fn generate_script(s: Core<'_>, brief: String, count: usize) -> Result<screenplay::Script> {
@@ -122,9 +161,13 @@ async fn list_models(s: Core<'_>, input: Edit) -> Result<Vec<String>> {
         .discover_models(catalog::Lookup {
             base: input.base,
             key: input.key,
-            source: catalog::Source::Connection {
-                id: input.id,
-                auth: input.relay.map(|r| r.auth),
+            source: if input.protocol == "comfy-image" {
+                catalog::Source::Comfy { id: input.id }
+            } else {
+                catalog::Source::Connection {
+                    id: input.id,
+                    auth: input.relay.map(|r| r.auth),
+                }
             },
         })
         .await?;
@@ -245,8 +288,29 @@ fn job_frame(s: Core, id: String) -> Result<Picked> {
     if kind(&j.protocol_id) != "image" {
         return Err("请选择一张图片。".into());
     }
-    s.store
-        .register("image", s.store.media(&j).ok_or("原图已移动")?, None)
+    s.store.register("image", s.store.original(&j)?, None)
+}
+#[tauri::command]
+async fn copy_job_image(app: AppHandle, s: Core<'_>, id: String, link: bool) -> Result<()> {
+    let job = s.store.job(&id)?;
+    if kind(&job.protocol_id) != "image" {
+        return Err("请选择一张图片。".into());
+    }
+    let file = s.store.original(&job)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if link {
+            let url = url::Url::from_file_path(file).map_err(|_| "本地文件地址无效。")?;
+            app.clipboard().write_text(url.as_str())
+        } else {
+            let rgba = export::read_image(&file)?.into_rgba8();
+            let (w, h) = rgba.dimensions();
+            app.clipboard()
+                .write_image(&tauri::image::Image::new_owned(rgba.into_raw(), w, h))
+        }
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 async fn export_job(
@@ -256,20 +320,63 @@ async fn export_job(
     resize: Option<export::Resize>,
     choose_location: bool,
 ) -> Result<Option<String>> {
+    export_selected(app, s, id, resize, choose_location, None).await
+}
+
+#[tauri::command]
+async fn export_input(s: Core<'_>, id: String) -> Result<tauri::ipc::Response> {
+    let job = s.store.job(&id)?;
+    if kind(&job.protocol_id) != "image" {
+        return Err("请选择图片作品。".into());
+    }
+    let file = s.store.original(&job)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || export::gpu_input(&file))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+async fn export_rendered(
+    app: AppHandle,
+    s: Core<'_>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Option<String>> {
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or("缺少导出参数")
+    };
+    let id = header("x-job-id")?.to_owned();
+    let spec = export::Resize {
+        width: header("x-width")?.parse().map_err(|_| "宽度无效")?,
+        height: header("x-height")?.parse().map_err(|_| "高度无效")?,
+        fit: header("x-fit")?.into(),
+    };
+    let choose = header("x-choose")? == "1";
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("缺少 PNG 数据。".into());
+    };
+    export::validate_rendered(data, &spec)?;
+    export_selected(app, s, id, Some(spec), choose, Some(data.clone())).await
+}
+
+async fn export_selected(
+    app: AppHandle,
+    s: Core<'_>,
+    id: String,
+    resize: Option<export::Resize>,
+    choose_location: bool,
+    rendered: Option<Vec<u8>>,
+) -> Result<Option<String>> {
     let j = s.store.job(&id)?;
     if resize.is_some() && kind(&j.protocol_id) != "image" {
         return Err("尺寸导出仅适用于图片。".into());
     }
-    let file = s
-        .store
-        .media(&j)
-        .ok_or("原文件已移动")?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let file = s.store.original(&j)?;
     let dir = s.store.home.join("作品");
-    if !file.starts_with(&dir) {
-        return Err("原文件路径无效".into());
-    }
     tauri::async_runtime::spawn_blocking(move || {
         let name = if let Some(spec) = &resize {
             spec.validate()?;
@@ -310,7 +417,11 @@ async fn export_job(
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             dir.join(format!("{}-{name}", &model::id()[..8]))
         };
-        export::write_copy(&file, &dest, resize.as_ref())?;
+        if let Some(png) = rendered {
+            export::write_output(&file, &dest, resize.as_ref(), Some(&png))?;
+        } else {
+            export::write_copy(&file, &dest, resize.as_ref())?;
+        }
         Ok(Some(
             dest.to_string_lossy()
                 .trim_start_matches(r"\\?\")
@@ -322,15 +433,7 @@ async fn export_job(
 }
 #[tauri::command]
 fn open_file(app: AppHandle, s: Core, id: String) -> Result<()> {
-    let p = s
-        .store
-        .media(&s.store.job(&id)?)
-        .ok_or("原文件已移动")?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !p.starts_with(s.store.home.join("作品")) {
-        return Err("作品路径无效。".into());
-    }
+    let p = s.store.original(&s.store.job(&id)?)?;
     app.opener()
         .open_path(p.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|e| e.to_string())
@@ -357,6 +460,16 @@ fn open_web(app: AppHandle, prompt: String) -> Result<()> {
 }
 pub fn run() {
     let mut builder = tauri::Builder::default();
+    #[cfg(feature = "render-benchmark")]
+    if std::env::var_os("MOBIUS_RENDER_BENCHMARK").is_some()
+        && std::env::var_os("MOBIUS_HOME").is_some()
+    {
+        builder = builder.on_page_load(|webview, page| {
+            if page.event() == tauri::webview::PageLoadEvent::Finished {
+                let _ = webview.eval(include_str!("../../tests/render-probe.js"));
+            }
+        });
+    }
     if std::env::var_os("MOBIUS_HOME").is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(w) = app.get_webview_window("main") {
@@ -399,10 +512,22 @@ pub fn run() {
                 .try_lock()
                 .map_err(|_| std::io::Error::other("此数据目录已在另一个莫比环窗口中打开。"))?;
             app.manage(guard);
+            #[cfg(feature = "render-benchmark")]
+            if std::env::var_os("MOBIUS_RENDER_BENCHMARK").is_some()
+                && store.home.join(".render-fixture").is_file()
+            {
+                use tauri::Listener;
+                let output = store.home.join("render-result.json");
+                app.listen("mobius-render-benchmark", move |event| {
+                    if let Ok(result) = serde_json::from_str::<Value>(event.payload()) {
+                        let _ = store::save(&output, &result);
+                    }
+                });
+            }
             let handle = app.handle().clone();
             let core = Arc::new(
-                Studio::new(store, move || {
-                    let _ = handle.emit("jobs-changed", ());
+                Studio::new(store, move |id| {
+                    let _ = handle.emit("jobs-changed", id);
                 })
                 .map_err(std::io::Error::other)?,
             );
@@ -412,7 +537,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             studio_state,
+            changed_jobs,
             integration_settings,
+            save_performance,
+            performance_mode,
+            set_final,
+            thumbnails::job_thumbnail,
+            thumbnails::video_poster,
+            thumbnails::save_video_poster,
             save_writer,
             save_storage,
             upload_image,
@@ -431,7 +563,10 @@ pub fn run() {
             resume_job,
             reuse_job,
             job_frame,
+            copy_job_image,
             export_job,
+            export_input,
+            export_rendered,
             open_file,
             open_folder,
             open_web

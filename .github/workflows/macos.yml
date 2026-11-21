@@ -32,6 +32,13 @@ jobs:
           cargo test --locked --release --features custom-protocol,installed --manifest-path src-tauri/Cargo.toml
       - name: Verify, install and launch the DMG
         run: bash tests/macos-dmg.sh
+      - name: Compare 4K CPU and graphics exports in WKWebView
+        run: npm run test:render -- --report=dist/macOS-render-4k.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-render-4k
+          path: dist/macOS-render-4k.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: Mobius-macOS-arm64

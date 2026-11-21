@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 import { creationMock, exerciseCreation } from './creation-matrix.mjs'
 import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
+import { comfyFixture, exerciseComfy, seedGallery, exerciseGallery } from './studio-24.mjs'
+import { backgroundFixture, exerciseBackgroundTasks } from './background-tasks.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -160,6 +162,21 @@ async function shot(name) {
   }
 }
 
+async function checkBackdrop(moving) {
+  const layer = page.locator('.preview-flow[aria-hidden="true"]')
+  await layer.waitFor()
+  await page.waitForFunction(expected => {
+    const layer = document.querySelector('.preview-flow')
+    return layer && ['::before', '::after'].every(pseudo =>
+      (getComputedStyle(layer, pseudo).animationName !== 'none') === expected)
+  }, moving)
+  if (moving) {
+    const pose = await layer.evaluate(el => getComputedStyle(el, '::before').transform)
+    await page.waitForFunction(previous =>
+      getComputedStyle(document.querySelector('.preview-flow'), '::before').transform !== previous, pose)
+  }
+}
+
 try {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
@@ -223,7 +240,13 @@ try {
     still = origin(files) + '/out.png'
   const matrix = creationMock({ clip, still, png })
   const workspace = workspaceMock(png)
+  const comfy = comfyFixture(png)
+  const background = backgroundFixture(clip, still)
+  const waitingMedia = { 'wan-image': Promise.withResolvers(), 'wan-video': Promise.withResolvers() }
+  let imageChecks = 0, videoChecks = 0
   relay = await listen(async (req, res, bytes) => {
+    if (background.handle(req, res, bytes)) return
+    if (comfy.handle(req, res, bytes)) return
     if (workspace.handle(req, res, bytes)) return
     if (await matrix.handle(req, res, bytes)) return
     const url = req.url,
@@ -313,14 +336,22 @@ try {
       assert.equal(headers.authorization, 'Bearer demo-legacy')
       return json(res, { output: { task_id: body().model } })
     }
-    if (url === '/v1/tasks/wan-image')
+    if (url === '/v1/tasks/wan-image') {
+      imageChecks++
+      if (imageChecks === 1) { res.writeHead(503); return res.end('{}') }
+      if (imageChecks === 2) return json(res, { output: { task_status: 'RUNNING' } })
+      await waitingMedia['wan-image'].promise
       return json(res, {
         output: { task_status: 'SUCCEEDED', results: [{ url: still }] },
       })
-    if (url === '/v1/tasks/wan-video')
+    }
+    if (url === '/v1/tasks/wan-video') {
+      if (++videoChecks === 1) return json(res, { output: { task_status: 'PENDING' } })
+      await waitingMedia['wan-video'].promise
       return json(res, {
         output: { task_status: 'SUCCEEDED', video_url: clip },
       })
+    }
     if (url === '/v1/contents/generations/tasks') {
       assert.equal(headers.authorization, 'Bearer demo-legacy')
       return json(res, { id: 'ark' })
@@ -416,6 +447,17 @@ try {
   await page.getByRole('button', { name: '作为视频首帧' }).click()
   await page.locator('.file-row').waitFor()
   assert.equal(await page.locator('.file-row').count(), 1)
+  await page.getByRole('button', { name: '作品库', exact: true }).click()
+  await page.locator('.card img').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '图生视频' }).waitFor()
+  await shot('作品库右键')
+  await page.keyboard.press('Escape')
+  await page.locator('.card').press('Shift+F10')
+  await page.getByRole('menuitem', { name: '图生视频' }).click()
+  await page.getByRole('img', { name: '视频首帧预览' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '视频', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.match(await page.locator('.file-row').innerText(), /old.png/)
+  assert.equal((await state()).jobs.length, 1)
   await page.getByRole('button', { name: '图片', exact: true }).click()
   await page.getByRole('button', { name: '管理模型连接' }).click()
   await page.getByRole('button', { name: '添加模型服务' }).click()
@@ -531,13 +573,80 @@ try {
     },
   })
   await submit(customImage, 'image', { size: '16:9' })
+  const keyless = await record({ ...profile('rh-video', ''), name: '待配置的视频连接' })
+  for (const unavailable of [mapped, keyless]) {
+    await page.getByRole('button', { name: '视频', exact: true }).click()
+    await service.selectOption(unavailable)
+    await page.getByRole('button', { name: '作品库', exact: true }).click()
+    const legacyCard = page.locator('.work-card').filter({ hasText: '旧版测试作品' })
+    const previousCount = (await state()).jobs.length
+    await legacyCard.getByRole('button', { name: '图生视频' }).click()
+    await page.getByRole('img', { name: '视频首帧预览' }).waitFor()
+    assert.equal(await service.inputValue(), vid)
+    assert.equal(await page.getByLabel('创作方式').inputValue(), 'first_frame')
+    assert.match(await page.locator('.file-row').innerText(), /old.png/)
+    assert.equal((await state()).jobs.length, previousCount)
+  }
   for (const [protocol, size] of [
     ['wan-image', '2048x2048'],
     ['wan-video', '1280x720'],
     ['ark-video', '16:9'],
   ]) {
     const id = await record(profile(protocol, 'demo-legacy'))
-    await submit(id, protocol.split('-')[1], { size, seconds: 5 })
+    if (protocol in waitingMedia) {
+      const media = protocol === 'wan-image' ? '图片' : '视频'
+      await page.getByRole('button', { name: media, exact: true }).click()
+      await service.selectOption(id)
+      await prompt.fill('山脊的晨雾缓慢散开，远处透出第一线日光')
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      await page.getByRole('button', { name: '生成' + media, exact: true }).click()
+      try {
+        await page.getByRole('group', { name: '最近提交的任务' }).getByRole('button', { name: '查看进度' }).click()
+        await page.getByRole('heading', { name: '正在生成' + media }).waitFor()
+        assert.equal(await page.locator('.preview-stages [aria-current=step]').innerText(), '模型生成')
+        await checkBackdrop(true)
+        const timer = page.getByRole('timer')
+        assert.match(await timer.innerText(), /已用时\s+\d+:\d{2}/)
+        if (media === '图片') {
+          await page.getByText(/进度查询暂时中断/).waitFor()
+          await timer.getByText(/后重试/).waitFor()
+          await shot('查询自动重试')
+          await page.getByText('服务商正在生成。', { exact: true }).waitFor()
+          assert.doesNotMatch(await timer.innerText(), /重试/)
+          await shot('图片生成中')
+          await page.emulateMedia({ reducedMotion: 'reduce' })
+          await checkBackdrop(false)
+        } else {
+          await page.getByText('服务商已接收，等待处理。', {exact:true}).waitFor()
+          await shot('视频生成中')
+          await page.getByRole('button', { name: '作品库', exact:true }).click()
+          await page.getByLabel('任务状态').selectOption('active')
+          await page.getByLabel('筛选作品').selectOption('video')
+          assert.equal(await page.locator('.work-card').count(), 1)
+          await page.locator('.work-card .card').dblclick()
+          await page.getByRole('heading', {name:'正在生成视频'}).waitFor()
+          await page.getByRole('button', { name: '作品库', exact:true }).click()
+          await page.getByLabel('任务状态').selectOption('all')
+          await page.getByRole('button', { name: '创作台', exact:true }).click()
+          for (const mode of ['eco', 'auto']) {
+            await page.getByRole('button', { name: '设置', exact: true }).click()
+            await page.getByRole('button', { name: '性能', exact: true }).click()
+            await page.getByLabel('性能模式').selectOption(mode)
+            await page.waitForFunction(m => document.querySelector('.shell').dataset.performance === m, mode)
+            await page.getByRole('button', { name: '创作台', exact: true }).click()
+            await checkBackdrop(mode === 'auto')
+          }
+        }
+      } finally {
+        waitingMedia[protocol].resolve()
+        await page.emulateMedia({ reducedMotion: null })
+      }
+      await page.waitForFunction(isImage => isImage
+        ? document.querySelector('.canvas img[alt="作品预览"]')?.naturalWidth === 1
+        : document.querySelector('.canvas video')?.readyState >= 1, media === '图片')
+      assert.equal(await page.locator('.preview-flow').count(), 0)
+      assert.equal(await page.getByRole('timer').count(), 0)
+    } else await submit(id, protocol.split('-')[1], { size, seconds: 5 })
   }
   for (const kind of ['image', 'video']) {
     const id = await record(profile('rh-' + kind, 'demo-site'))
@@ -563,6 +672,9 @@ try {
   const card = page
     .locator('.card')
     .filter({ has: page.locator('small', { hasText: 'openai-video' }) })
+  await card.locator('img').waitFor({timeout: 15000})
+  const poster = await page.evaluate(id => window.__TAURI_INTERNALS__.invoke('video_poster', {id}), film.id)
+  assert.ok(poster.path?.endsWith('.png'), 'The video frame should become a reusable disk thumbnail')
   await card.dblclick()
   await page.waitForFunction(
     () => document.querySelector('.canvas video')?.readyState >= 1,
@@ -594,19 +706,56 @@ try {
     shot,
     templates,
   })
+  await exerciseComfy({ page,base,done,shot,fixture:comfy })
   await exerciseWorkspace({ page, base, oldId, shot, state, mock: workspace })
   await stop()
+  const oldTask = JSON.parse(await readFile(path.join(data, 'tasks', oldId + '.json'), 'utf8'))
+  const previewCases = [
+    ['b'.repeat(32), '文件丢失用例', 'done', 'missing.png', '找不到本地原文件'],
+    ['c'.repeat(32), '读取失败用例', 'done', 'broken.png', '图片预览未能打开'],
+    ['d'.repeat(32), '生成失败用例', 'failed', null, '图片生成失败'],
+  ]
+  await writeFile(path.join(data, '作品', 'broken.png'), 'invalid image fixture')
+  await seedGallery(data)
+  for (const [Id, Prompt, Status, FileName] of previewCases) {
+    await writeFile(path.join(data, 'tasks', Id + '.json'), JSON.stringify({ ...oldTask, Id, Prompt, Status, FileName, Cloud: null }))
+  }
   await delay(500)
   await start()
   assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
   await page.getByRole('button', { name: '视频', exact: true }).click()
   assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
-  assert.equal((await state()).jobs.length, 21 + extra)
+  assert.equal((await state()).jobs.length, 21 + extra + previewCases.length + 2 + 120)
+  for (const [, name, , , heading] of previewCases) {
+    await page.getByRole('button', { name: '作品库', exact: true }).click()
+    await page.locator('.card').filter({ hasText: name }).dblclick()
+    await page.getByRole('heading', { name: heading }).waitFor()
+    assert.equal(await page.locator('.preview-stages').count(), 0)
+    assert.equal(await page.locator('.preview-flow').count(), 0)
+  }
   await page.getByRole('button', { name: '剧本', exact: true }).click()
   await page.getByRole('heading', { name: '渡口，日出之前' }).waitFor()
   const settings = await page.evaluate(() => window.studio.settings())
   assert.ok(settings.writer.hasKey && settings.hasStorageKey && settings.storage.automatic)
   assert.equal(settings.writer.model, 'studio-writer-from-list')
+  await page.getByText(/^关联作品 · /).first().click()
+  await page.getByRole('button',{name:'已定稿',exact:true}).waitFor()
+  await page.getByRole('button',{name:'设置',exact:true}).click()
+  await page.getByRole('button',{name:'性能',exact:true}).click()
+  await page.getByLabel('性能模式').selectOption('performance')
+  await page.getByText('性能设置已保存。',{exact:true}).waitFor()
+  await shot('性能设置')
+  await exerciseGallery({page,shot})
+  await page.getByRole('button',{name:'设置',exact:true}).click()
+  await page.getByLabel('性能模式').selectOption('eco')
+  await page.waitForFunction(()=>document.querySelector('.shell')?.dataset.performance==='eco')
+  await stop()
+  await start()
+  await page.getByRole('button',{name:'设置',exact:true}).click()
+  await page.getByRole('button',{name:'性能',exact:true}).click()
+  assert.equal(await page.getByLabel('性能模式').inputValue(), 'eco')
+  await exerciseBackgroundTasks({ page, base, fixture: background, record, state, done, shot, png, video,
+    restart: async () => { await stop(); await start(); return page } })
   console.log('Screenplay editing, scene handoff, manual and automatic signed uploads, retry and restart passed')
   assert.deepEqual(errors, [])
   console.log(

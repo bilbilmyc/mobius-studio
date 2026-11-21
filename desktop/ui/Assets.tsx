@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { Modal } from './Editor'
-import type { JobView, Picked, Slot } from '../shared'
+import { LibraryThumbnail } from './LibraryThumbnail'
+import type { JobView, PerformanceMode, Picked, Slot } from '../shared'
 
 export function frameOrder(items: Picked[]): Picked[] {
   return items
@@ -67,6 +68,7 @@ export function Assets({
   paired,
   allowLink,
   jobs,
+  performance,
   add,
   change,
   report,
@@ -76,6 +78,7 @@ export function Assets({
   paired: boolean
   allowLink: boolean
   jobs: JobView[]
+  performance: PerformanceMode
   add: (more: Picked[], role?: string) => void
   change: (v: Picked[]) => void
   report: (m: string) => void
@@ -277,7 +280,7 @@ export function Assets({
                     })
                   }
                 >
-                  <img alt="" src={convertFileSrc(j.mediaPath!)} />
+                  <LibraryThumbnail job={j} mode={performance} />
                   <span>{j.prompt || j.model}</span>
                 </button>
               ))}

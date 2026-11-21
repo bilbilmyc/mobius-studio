@@ -189,7 +189,7 @@ export function creationMock({ clip, still, png }) {
     if (url === '/v1/matrix/status/resume') {
       if (!failOnce.has(url)) {
         failOnce.add(url)
-        return reply({ message: 'temporary test outage' }, 503)
+        return reply({ message: 'status permission required' }, 403)
       }
       return reply({ data: { status: 'completed', url: clip } })
     }
@@ -486,6 +486,7 @@ export async function exerciseCreation({
   assert.ok(saved)
   saved = await done(saved.id)
   assert.equal(saved.settings['params.seed'], 64)
+  await page.getByRole('group', { name: '最近提交的任务' }).filter({ hasText: prompt }).getByRole('button').click()
   await page.getByRole('button', { name: '复用参数' }).click()
   await first.locator('.asset-thumb').waitFor()
   assert.match(await last.innerText(), /tail.png/)

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-shopt -s nullglob
-images=(dist/Mobius-macOS-arm64-*.dmg)
-[[ ${#images[@]} == 1 && $(uname -m) == arm64 ]]
-hdiutil verify "${images[0]}"
+version=$(node -p "require('./package.json').version")
+image=${1:-"dist/Mobius-macOS-arm64-${version}.dmg"}
+[[ -f "$image" && $(uname -m) == arm64 ]]
+hdiutil verify "$image"
 work=$(mktemp -d)
 mounted="$work/volume"
 app="$work/Applications/莫比环.app"
@@ -13,7 +13,7 @@ cleanup() {
   if [[ "$attached" == true ]]; then hdiutil detach "$mounted"; fi
 }
 trap cleanup EXIT
-hdiutil attach "${images[0]}" -readonly -nobrowse -mountpoint "$mounted"
+hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mounted"
 attached=true
 ditto "$mounted/莫比环.app" "$app"
 hdiutil detach "$mounted"
@@ -26,4 +26,4 @@ minos=$(xcrun vtool -show-build "$binary" | awk '$1 == "minos" {print $2}')
 [[ "$minos" == 13.0 || "$minos" == 13.0.0 ]]
 codesign --verify --strict --deep --verbose=2 "$app"
 node tests/macos-installed.mjs "$binary" "$work/Data"
-shasum -a 256 "${images[0]}"
+shasum -a 256 "$image"
