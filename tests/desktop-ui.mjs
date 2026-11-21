@@ -23,6 +23,7 @@ import { shotFixture, exerciseTwoShots } from './two-shot-workspace.mjs'
 import { exerciseOptimizer, optimizerFixture } from './prompt-optimizer.mjs'
 import { exerciseGenerationOptimization, generationFixture } from './generation-optimization.mjs'
 import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
+import { exerciseDelivery } from './delivery-specs.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -175,10 +176,10 @@ async function done(id) {
     'Timed out waiting for local task ' + id + ' ' + JSON.stringify(errors),
   )
 }
-async function shot(name) {
+async function shot(name, target = page) {
   if (captures) {
     await mkdir(captures, { recursive: true })
-    await page.screenshot({ path: path.join(captures, name + '.png') })
+    await target.screenshot({ path: path.join(captures, name + '.png') })
   }
 }
 
@@ -266,9 +267,18 @@ async function run() {
   const optimizer = optimizerFixture(png)
   const generation = generationFixture(png, clip)
   const help = taskHelpFixture(png, video)
+  const deliveryCalls = []
   const waitingMedia = { 'wan-image': Promise.withResolvers(), 'wan-video': Promise.withResolvers() }
   let imageChecks = 0, videoChecks = 0
   relay = await listen(async (req, res, bytes) => {
+    if (req.url === '/delivery/v1/tasks/create') {
+      assert.equal(req.headers['x-auth-token'], 'delivery-fixture')
+      deliveryCalls.push(JSON.parse(bytes.toString()))
+      return json(res, { code: 200, data: { task_id: 'delivery-' + deliveryCalls.length } })
+    }
+    if (req.url.startsWith('/delivery/v1/tasks/delivery-')) {
+      return json(res, { code: 200, data: { status: 'completed', result_oss_url: still } })
+    }
     if (await help.handle(req, res, bytes)) return
     if (await generation.handle(req, res, bytes)) return
     if (await optimizer.handle(req, res, bytes)) return
@@ -397,6 +407,12 @@ async function run() {
     restart: restartNormally, firstFrame: path.join(data, '作品', 'old.png'), lastFrame: path.join(root, 'src', 'orbit.png'), video,
     processingTemplate: templates.find(t => t.Video && !t.Text).Key })
   const checkHelp = () => exerciseTaskHelp({ page, base, fixture: help, record, state, done, shot, restart: restartNormally, video })
+  const checkDelivery = () => exerciseDelivery({ data, restart: restartNormally, shot, record, base, calls: deliveryCalls, templates, done })
+  if (process.argv.includes('--delivery-only')) {
+    await checkDelivery()
+    assert.deepEqual(errors, [])
+    return
+  }
   if (process.argv.includes('--help-only')) {
     await checkHelp()
     assert.deepEqual(errors, [])
@@ -821,6 +837,7 @@ async function run() {
   await checkOptimizer()
   await checkGeneration()
   await checkHelp()
+  await checkDelivery()
   assert.deepEqual(errors, [])
 }
 try {

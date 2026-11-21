@@ -1,21 +1,7 @@
 import { useState } from 'react'
 import { Modal } from './Editor'
 import type { JobView } from '../shared'
-export function aspect(width: number, height: number) {
-  let a = width,
-    b = height
-  while (b) {
-    ;[a, b] = [b, a % b]
-  }
-  return a ? width / a + ':' + height / a : ''
-}
-function fitSize(w: number, h: number, ratio: string) {
-  const [x, y] = ratio.split(':').map(Number)
-  if (!x || !y) return [w, h]
-  return w / h > x / y
-    ? [Math.max(1, Math.round((h * x) / y)), h]
-    : [w, Math.max(1, Math.round((w * y) / x))]
-}
+import { aspect, fitSize, requestedGeometry } from './outputSpecs'
 export function ImageExport({
   job,
   url,
@@ -31,8 +17,10 @@ export function ImageExport({
   close: () => void
   saved: (s: string, engine: string, fallback: string) => void
 }) {
-  const initial = job.size.includes(':') ? job.size : aspect(w, h)
-  const [[width, height], size] = useState(() => fitSize(w, h, initial)),
+  const request = requestedGeometry(job)
+  const initial = request?.ratio ?? aspect(w, h)
+  const dimensions = (r: string) => r === request?.ratio && request.pixels ? request.pixels : fitSize(w, h, r)
+  const [[width, height], size] = useState(() => dimensions(initial)),
     [ratio, setRatio] = useState(initial),
     [fit, setFit] = useState<'crop' | 'contain'>('crop'),
     [busy, setBusy] = useState(false),
@@ -103,7 +91,7 @@ export function ImageExport({
             onChange={(e) => {
               const r = e.target.value
               setRatio(r)
-              if (r !== 'custom') size(fitSize(w, h, r))
+              if (r !== 'custom') size(dimensions(r))
             }}
           >
             {[

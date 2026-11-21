@@ -39,7 +39,9 @@ import {
   type PromptOptimization,
 } from '../shared'
 import { Modal, Prompt } from './Editor'
-import { ImageExport, aspect } from './ImageExport'
+import { ImageExport } from './ImageExport'
+import { OutputSpecs, type MediaMetadata } from './MediaDelivery'
+import { requestedAudio } from './outputSpecs'
 import { ParameterField } from './ProtocolSettings'
 import { ConnectionEditor } from './ConnectionEditor'
 import { Assets, addAssets, frameOrder } from './Assets'
@@ -53,7 +55,7 @@ import { ComfyControls } from './ComfyControls'
 import { useStudioState } from './useStudioState'
 import { useShotDrafts } from './useShotDrafts'
 import { adoptPrompt, generationCandidate, optimizationModes, PromptOptimizer, promptReferences, usePromptRequests } from './PromptOptimizer'
-import { comparisonOptions, peerInput, ComparisonDialog } from './ImageComparison'
+import { comparisonOptions, comparisonSpecs, peerInput, ComparisonDialog } from './ImageComparison'
 import { ServiceError, UsageHelp } from './UsageHelp'
 import { taskGuidance } from './taskHelp'
 const example = {
@@ -122,12 +124,7 @@ function App() {
     } | null>(null),
     [removing, remove] = useState<ProfileView | null>(null),
     [busy, markBusy] = useState(false)
-  const [metadata, setMetadata] = useState<{
-    id: string
-    w: number
-    h: number
-    duration?: number
-  }>()
+  const [metadata, setMetadata] = useState<MediaMetadata>()
   const [exporting, setExporting] = useState(false)
   const [unreadable, setUnreadable] = useState('')
   const [section, setSection] = useState<SettingsSection>('media')
@@ -315,7 +312,7 @@ function App() {
   const recentIssue = recent && ['failed', 'uncertain', 'paused'].includes(recent.status) ? taskGuidance(recent, Date.now()) : undefined
   const comparisons = data?.comparisons ?? []
   const pictureOptions = kind === 'image' ? comparisonOptions(externals, official, id,
-    native ? currentTemplate.Key : selectedModel!, intent, assets) : []
+    native ? currentTemplate.Key : selectedModel!, intent, assets, draft) : []
   const peer = pictureOptions.find(option => option.key === composer.compare)
   const mediaAction = peer ? '用两个模型生成' : kind === 'video' ? '生成视频' : '生成图片'
   const generationMode = hasPrompt ? composer.generationOptimization : undefined
@@ -433,7 +430,7 @@ function App() {
         priority: draft.priority,
         assets: paired ? frameOrder(assets) : assets,
       }
-      const group = peer ? await window.studio.startComparison([input, peerInput(input, peer, intent)]) : undefined
+      const group = peer ? await window.studio.startComparison([input, peerInput(input, peer)]) : undefined
       const next = group ? group.jobIds[0] : await window.studio.start(input)
       if (candidate) change(old => adoptPrompt(old, candidate))
       if (choice) setGenerationReview(null)
@@ -728,6 +725,7 @@ function App() {
                           })
                         }}
                         controls
+                        muted={requestedAudio(job) === false}
                         preload="metadata"
                       />
                     ) : (
@@ -802,16 +800,7 @@ function App() {
                         .join('　·　')
                     : frameUrl ? '填写镜头运动或画面变化，确认参数后即可生成视频。' : example[kind]}
                 </p>
-                {job && metadata?.id === job.id && (
-                  <p className="media-info">
-                    实际{job.kind === 'video' ? '视频' : '图片'} {metadata.w} ×{' '}
-                    {metadata.h} · {aspect(metadata.w, metadata.h)}
-                    {metadata.duration !== undefined &&
-                    Number.isFinite(metadata.duration)
-                      ? ' · ' + metadata.duration.toFixed(2) + ' 秒'
-                      : ''}
-                  </p>
-                )}
+                {job?.file && <OutputSpecs key={job.id} job={job} metadata={metadata?.id === job.id ? metadata : undefined} />}
                 {job && (
                   <CloudSave job={job} settings={integrations} configure={() => settingsPage('storage')} report={say} />
                 )}
@@ -1246,12 +1235,13 @@ function App() {
                   <button className="link" onClick={() => inspect(recent, true)}>{jobAction(recent)}</button>
                 </div>}
                 <small>
-                  {kind === 'image' && composer.compare && '2 个生成任务 · 当前模型 '}
+                  {peer && <>2 个生成任务<br />当前模型　{native ? currentTemplate.Name : selectedModel} · {comparisonSpecs(draft, native)} · </>}
                   {native
                     ? quote(currentTemplate, draft.config, draft.priority)
                     : proto === 'comfy-image' ? '由所连 ComfyUI 运行'
                     : '由所选服务商结算'}
-                  {peer && ' · 对比模型 ' + peer.price}
+                  {peer && <><br />对比模型　{peer.name} · {comparisonSpecs(peer.parameters, !!peer.template)} · {peer.price}
+                    {comparisonSpecs(draft, native) !== comparisonSpecs(peer.parameters, !!peer.template) && <><br />两侧参数不同，请确认后生成。</>}</>}
                 </small>
                 {submitIssue?.scope === promptScope && <ServiceError message={submitIssue.message}
                   configure={() => edit({ official: id === '@site', profile: profile ?? official })} />}

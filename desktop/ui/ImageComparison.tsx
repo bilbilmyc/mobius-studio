@@ -7,11 +7,26 @@ import {
 } from '../shared'
 import { Modal } from './Editor'
 import { taskGuidance, useVisibleTime } from './taskHelp'
+import { aspect } from './outputSpecs'
+
+type Parameters = Pick<Start, 'size' | 'config' | 'priority'>
+function imageRatio({ size, config }: Parameters) {
+  if (config.aspect || config.ratio) return String(config.aspect || config.ratio)
+  const pixels = /^(\d+)x(\d+)$/i.exec(size)
+  return pixels ? aspect(+pixels[1], +pixels[2]) : size
+}
+
+export function comparisonSpecs(parameters: Parameters, official: boolean) {
+  const { size, config, priority } = parameters
+  return [...new Set([imageRatio(parameters), !official && size, config.resolution,
+    official && (priority ? '高优先级队列' : '普通队列')].filter(Boolean))].join(' · ')
+}
 
 interface Option {
   key: string
   name: string
   price: string
+  parameters: Parameters
   id: string
   model: string
   profile?: ProfileView
@@ -19,18 +34,24 @@ interface Option {
 }
 
 export function comparisonOptions(profiles: ProfileView[], official: ProfileView | undefined,
-  currentId: string, currentModel: string, mode: string, assets: Picked[]): Option[] {
+  currentId: string, currentModel: string, mode: string, assets: Picked[], primary: Parameters): Option[] {
   const options: Option[] = []
   const current = profiles.find(p => p.Id === currentId) ?? official
-  const add = (id: string, model: string, name: string, price: string, p?: ProfileView, t?: Template) => {
+  const add = (id: string, model: string, name: string, price: string, parameters: Parameters, p: ProfileView, t?: Template) => {
     if (model === currentModel && (id === currentId || p?.BaseUrl === current?.BaseUrl)) return
-    options.push({ key: JSON.stringify([id, model]), id, model, name, price, profile: p, template: t })
+    options.push({ key: JSON.stringify([id, model]), id, model, name, price, parameters, profile: p, template: t })
   }
   function officialOptions(id: string, p: ProfileView) {
     if (!p.hasKey) return
     for (const t of templates.filter(t => !t.Video && officialModes(t).includes(mode))) {
       if (mode === 'i2i' && assets.length > (t.Slots.find(s => s.Kind === 'image')?.Max ?? 0)) continue
-      add(id, t.Key, (id === '@site' ? '官网' : p.Name) + ' · ' + t.Name, quote(t, defaultConfig(t), 0), p, t)
+      const config = defaultConfig(t)
+      for (const field of t.Fields) {
+        const requested = ['aspect', 'ratio'].includes(field.Key) ? imageRatio(primary) : primary.config[field.Key]
+        if (field.Options?.some(o => o.Value === requested)) config[field.Key] = requested
+      }
+      const parameters = { config, size: String(config.aspect ?? config.ratio ?? primary.size), priority: primary.priority }
+      add(id, t.Key, (id === '@site' ? '官网' : p.Name) + ' · ' + t.Name, quote(t, config, parameters.priority), parameters, p, t)
     }
   }
   if (official) officialOptions('@site', official)
@@ -40,25 +61,24 @@ export function comparisonOptions(profiles: ProfileView[], official: ProfileView
     if (!preset.modes?.includes(mode) && !p.Relay?.workflows?.[mode]) continue
     const slot = relaySlots(mode, preset.maxImages ?? 1, p.Relay?.workflows?.[mode]?.body)[0]
     if (slot && assets.length > slot.Max) continue
+    const sizes = p.Relay?.sizes.length ? p.Relay.sizes : p.Controls?.sizes.length ? p.Controls.sizes : preset.sizes
+    const resolutions = p.Controls?.resolutions.length ? p.Controls.resolutions : preset.resolutions ?? []
+    const ratios = p.Controls?.ratios ?? []
+    const ratio = imageRatio(primary)
+    const parameters = p.Id === currentId ? primary : {
+      size: [primary.size, ratio].find(s => sizes.includes(s)) ?? sizes[0],
+      config: { mode, resolution: resolutions.includes(String(primary.config.resolution)) ? primary.config.resolution : resolutions[0] ?? '',
+        ratio: ratios.includes(ratio) ? ratio : ratios[0] ?? '' }, priority: 0,
+    }
     for (const model of profileModels(p))
-      add(p.Id, model, p.Name + ' · ' + model, p.ProtocolId === 'comfy-image' ? '本地运行' : '由服务商结算', p)
+      add(p.Id, model, p.Name + ' · ' + model, p.ProtocolId === 'comfy-image' ? '本地运行' : '由服务商结算', parameters, p)
   }
   return options
 }
 
-export function peerInput(input: Start, option: Option, mode: string): Start {
-  const p = option.profile!
-  if (option.template) return { ...input, profileId: option.id, model: undefined,
-    template: option.template.Key, config: defaultConfig(option.template), priority: 0 }
-  if (input.profileId === option.id) return { ...input, model: option.model }
-  const preset = presets[p.ProtocolId]
-  const sizes = p.Relay?.sizes.length ? p.Relay.sizes : p.Controls?.sizes.length ? p.Controls.sizes : preset.sizes
-  const resolutions = p.Controls?.resolutions.length ? p.Controls.resolutions : preset.resolutions ?? []
-  const ratios = p.Controls?.ratios ?? []
-  return { ...input, profileId: option.id, model: option.model, priority: 0, seconds: 0,
-    size: sizes.includes(input.size) ? input.size : sizes[0],
-    config: { mode, resolution: resolutions.includes(String(input.config.resolution)) ? input.config.resolution : resolutions[0] ?? '',
-      ratio: ratios.includes(String(input.config.ratio)) ? input.config.ratio : ratios[0] ?? '' } }
+export function peerInput(input: Start, option: Option): Start {
+  return { ...input, ...option.parameters, profileId: option.id, model: option.template ? undefined : option.model,
+    template: option.template?.Key ?? input.template, seconds: 0 }
 }
 
 export function ComparisonDialog({ group, jobs, close, selected, inspect }: {

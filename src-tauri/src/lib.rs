@@ -20,6 +20,7 @@ mod store;
 mod tests;
 mod thumbnails;
 mod vault;
+mod video_export;
 #[cfg(test)]
 mod workspace_tests;
 mod writer;
@@ -628,6 +629,7 @@ pub fn run() {
                 .map_err(std::io::Error::other)?,
             );
             app.manage(core.clone());
+            app.manage(video_export::VideoFiles::default());
             core.recover().map_err(std::io::Error::other)?;
             Ok(())
         })
@@ -670,6 +672,10 @@ pub fn run() {
             export_job,
             export_input,
             export_rendered,
+            video_export::open_video_io,
+            video_export::read_video_part,
+            video_export::write_video_part,
+            video_export::close_video_io,
             open_file,
             open_folder,
             open_web
