@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmod, copyFile, mkdir, readFile, readdir, rename } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { chmod, copyFile, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -35,12 +36,12 @@ const tag = `Mobius-${platform.name}-${arch}`
 const webDirectory = `.app-build/bundles/${tag}-${installer ? 'installed' : 'portable'}`
 const webConfig = JSON.stringify({ build: { frontendDist: '../' + webDirectory } })
 
-function run(program, args, cwd = root) {
+function run(program, args, cwd = root, extraEnv = {}) {
   const result = spawnSync(program, args, {
-    cwd, stdio: 'inherit', env: { ...process.env, MOBIUS_UI_OUT: join(root, webDirectory) },
+    cwd, stdio: 'inherit', env: { ...process.env, MOBIUS_UI_OUT: join(root, webDirectory), ...extraEnv },
   })
   if (result.error) throw result.error
-  if (result.status !== 0) process.exit(result.status ?? 1)
+  if (result.status !== 0) throw Error(`${program} ${args[0]} failed (${result.signal ?? result.status})`)
 }
 
 const flags = installer ? ['--features', 'installed', '--bundles', platform.bundle] : ['--no-bundle']
@@ -63,8 +64,16 @@ if (installer) {
   await copyFile(join(release, 'mobius-studio' + (system === 'win32' ? '.exe' : '')), dest + '.new')
   if (system === 'linux') await chmod(dest + '.new', 0o755)
   await rename(dest + '.new', dest)
-  if (system === 'win32')
-    run('tar.exe', ['-a', '-cf', join(output, tag + '.zip'), '--options', 'zip:hdrcharset=UTF-8', binary], portable)
-  else run('tar', ['-czf', join(output, tag + '.tar.gz'), binary], portable)
+  if (system === 'win32') {
+    const staged = join(output, `${tag}-${randomUUID()}.zip`)
+    try {
+      run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        "$ErrorActionPreference = 'Stop'\nCompress-Archive -LiteralPath $env:MOBIUS_ZIP_SOURCE -DestinationPath $env:MOBIUS_ZIP_OUTPUT -CompressionLevel Optimal",
+      ], portable, { MOBIUS_ZIP_SOURCE: dest, MOBIUS_ZIP_OUTPUT: staged })
+      await rename(staged, join(output, tag + '.zip'))
+    } finally {
+      await rm(staged, { force: true })
+    }
+  } else run('tar', ['-czf', join(output, tag + '.tar.gz'), binary], portable)
   console.log(portable)
 }

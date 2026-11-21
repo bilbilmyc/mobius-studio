@@ -40,6 +40,17 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run package -- --arch=${{ matrix.arch }}
+      - name: Verify the Windows portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = 'Mobius-Windows-${{ matrix.arch }}'
+          $extracted = Join-Path $env:RUNNER_TEMP 'mobius-portable-check'
+          Expand-Archive -LiteralPath "dist/$package.zip" -DestinationPath $extracted
+          $entries = @(Get-ChildItem -LiteralPath $extracted -Force)
+          if ($entries.Count -ne 1 -or $entries[0].Name -cne '莫比环.exe') { throw 'Unexpected portable ZIP contents' }
+          $expected = (Get-FileHash -LiteralPath "dist/$package/莫比环.exe").Hash
+          if ((Get-FileHash -LiteralPath $entries[0].FullName).Hash -ne $expected) { throw 'Portable executable differs from the build' }
       - run: npm run installer -- --arch=${{ matrix.arch }}
       - run: npm run build
       - run: cargo test --locked --release --features custom-protocol,installed --manifest-path src-tauri/Cargo.toml
