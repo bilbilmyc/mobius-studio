@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -37,14 +37,27 @@ await once(server, 'listening')
 const endpoint = 'http://127.0.0.1:' + server.address().port
 const account = id + '@' + endpoint, service = 'com.mobius.creative.studio'
 const record = path.join(data, 'tasks', id + '.json')
-let child, keyCreated = false, log = ''
+const keychain = path.join(path.dirname(data), 'fixture.keychain-db')
+const password = randomUUID()
+function security(...args) { return execFileSync('security', args, { encoding: 'utf8' }) }
+const originalKeychains = security('list-keychains', '-d', 'user').trim().split('\n')
+  .map(line => line.trim().replace(/^"|"$/g, '')).filter(Boolean)
+let child, keychainCreated = false, log = ''
 try {
   await mkdir(path.dirname(record), { recursive: true })
-  // The CLI creates the synthetic item on behalf of an ad-hoc signed app. Let the
-  // headless runner read just this disposable fixture without a Keychain consent dialog.
-  execFileSync('security', ['add-generic-password', '-s', service, '-a', account,
-    '-w', 'storage-fixture-secret', '-A'])
-  keyCreated = true
+  // macOS identifies an ad-hoc signed client by the code directory hash. Set that
+  // partition explicitly for the synthetic item in its own temporary Keychain.
+  const info = spawnSync('codesign', ['--display', '--verbose=4', binary], { encoding: 'utf8' })
+  assert.equal(info.status, 0, info.stderr)
+  const cdhash = info.stderr.match(/^CDHash=([0-9a-f]+)$/mi)?.[1].toLowerCase()
+  assert.ok(cdhash, 'missing installed executable code directory hash')
+  security('create-keychain', '-p', password, keychain)
+  keychainCreated = true
+  security('unlock-keychain', '-p', password, keychain)
+  security('list-keychains', '-d', 'user', '-s', keychain, ...originalKeychains)
+  security('add-generic-password', '-s', service, '-a', account, '-w', 'storage-fixture-secret', '-A', keychain)
+  security('set-generic-password-partition-list', '-a', account, '-s', service,
+    '-S', 'apple-tool:,cdhash:' + cdhash, '-k', password, keychain)
   await writeFile(path.join(data, 'settings.json'), JSON.stringify({
     storage: { endpoint, bucket: 'test-bucket', prefix: 'stills', region: 'auto', accessKey: 'storage-fixture', automatic: true },
     storageKey: { Id: id, BaseUrl: endpoint, Keys: { ['macos:' + endpoint]: account } },
@@ -85,5 +98,8 @@ try {
   }
   server.closeAllConnections()
   server.close()
-  if (keyCreated) execFileSync('security', ['delete-generic-password', '-s', service, '-a', account])
+  if (keychainCreated) {
+    security('list-keychains', '-d', 'user', '-s', ...originalKeychains)
+    security('delete-keychain', keychain)
+  }
 }
