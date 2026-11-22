@@ -77,6 +77,28 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
     ] })
   }, root)
   await page.reload()
+  await button('优化提示词').click()
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '优化原文', undefined, { timeout: 3000 })
+  await button('丰富细节').click()
+  assert.equal(await button('丰富细节').getAttribute('aria-pressed'), 'true')
+  await original().click()
+  await page.keyboard.type('Frame A')
+  await original().press('Enter')
+  const ime = await page.context().newCDPSession(page)
+  await ime.send('Input.imeSetComposition', { text: 'yu', selectionStart: 2, selectionEnd: 2 })
+  await ime.send('Input.insertText', { text: '雨后码头' })
+  await ime.detach()
+  await suggestion().click()
+  await page.keyboard.insertText('手写优化稿，保留远处的灯塔。')
+  assert.deepEqual([await original().inputValue(), await suggestion().inputValue()],
+    ['Frame A\n雨后码头', '手写优化稿，保留远处的灯塔。'], 'Both empty optimizer fields must accept keyboard input')
+  assert.equal(await prompt().inputValue(), 'Frame A\n雨后码头')
+  await button('采用优化稿').click()
+  assert.equal(await prompt().inputValue(), '手写优化稿，保留远处的灯塔。')
+  await button('还原原文').click()
+  assert.equal(await prompt().inputValue(), 'Frame A\n雨后码头')
+  assert.deepEqual(fixture.textCalls, [])
+  assert.equal(fixture.imageCalls.length, 0)
   await openScene('西门红伞')
   await prompt().fill(imageA)
   await button('优化提示词').click()
@@ -91,6 +113,36 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
   await button('优化提示词').click()
   assert.equal(await original().inputValue(), imageA)
   assert.equal(await tool().getByRole('button', { name: '润色原意' }).getAttribute('aria-pressed'), 'true')
+  await page.evaluate(() => {
+    const optimize = window.studio.optimizePrompt
+    window.studio.optimizePrompt = () => {
+      window.studio.optimizePrompt = optimize
+      return new Promise(resolve => { window.finishDelayedEdit = () => resolve({ text: '较早请求的回复', model: 'test' }) })
+    }
+  })
+  await button('开始优化').click()
+  await page.waitForFunction(() => typeof window.finishDelayedEdit === 'function')
+  const manual = '正在等待时手写的版本。'
+  const revised = '在弹窗内修改后的原文。'
+  await suggestion().click()
+  await page.keyboard.insertText(manual)
+  await original().fill(revised)
+  await page.evaluate(async () => {
+    window.finishDelayedEdit()
+    delete window.finishDelayedEdit
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+  })
+  assert.equal(await suggestion().inputValue(), manual)
+  await button('关闭对照').click()
+  assert.equal(await prompt().inputValue(), revised)
+  await button('查看优化稿').click()
+  assert.equal(await original().inputValue(), revised)
+  assert.equal(await suggestion().inputValue(), manual)
+  await button('采用优化稿').click()
+  await button('还原原文').click()
+  assert.equal(await prompt().inputValue(), revised)
+  await button('优化提示词').click()
+  await original().fill(imageA)
   await button('开始优化').click()
   await button('收起').click()
   const newerDraft = imageA + ' Keep the lettering level.'
@@ -117,7 +169,9 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
   await openScene('西门红伞')
   assert.equal(await prompt().inputValue(), newerDraft)
   await button('查看优化稿').click()
-  assert.equal(await original().inputValue(), imageA)
+  assert.equal(await original().inputValue(), newerDraft)
+  await tool().getByText('当前草稿已修改，查看优化时的原文').click()
+  assert.equal(await tool().locator('.optimizer-history p').innerText(), imageA)
   await review(polished)
   const adopted = polished + ' Keep the composition level.'
   await suggestion().fill(adopted)

@@ -173,6 +173,7 @@ input.library-search { width: clamp(170px, 24vw, 340px); }
 .optimizer-columns label { min-width:0; display:flex; flex-direction:column; align-items:stretch; gap:6px; }
 .optimizer-columns textarea { min-height:140px; height:clamp(140px,29vh,290px); resize:vertical; }
 .optimizer-columns textarea[readonly] { color:var(--dim); }
+.optimizer-history p { white-space:pre-wrap; overflow-wrap:anywhere; }
 .optimizer-actions { flex-wrap:wrap; }
 .generation-prompt-mode { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; }
 .generation-prompt-mode select { width:auto; min-height:30px; margin:0; padding:3px 8px; }

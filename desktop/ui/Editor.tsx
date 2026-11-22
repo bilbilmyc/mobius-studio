@@ -5,18 +5,21 @@ export function Modal({
   close,
   children,
   wide = false,
+  initialFocus,
 }: {
   title: string
   close: () => void
   children: React.ReactNode
   wide?: boolean
+  initialFocus?: React.RefObject<HTMLElement | null>
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const el = ref.current!
     el.showModal()
+    initialFocus?.current?.focus()
     return () => el.close()
-  }, [])
+  }, [initialFocus])
   return (
     <dialog
       ref={ref}

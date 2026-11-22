@@ -449,7 +449,7 @@ export type PromptReferences = 'none' | 'reference' | 'first_frame' | 'last_fram
 export interface PromptOptimization { prompt: string; kind: MediaKind; mode: OptimizationMode; references: PromptReferences }
 export interface PromptResult { text: string; model: string }
 export interface OptimizedPrompt extends PromptResult { mode: OptimizationMode; references?: PromptReferences }
-export interface PromptSuggestion extends OptimizedPrompt { original: string }
+export interface PromptSuggestion extends OptimizedPrompt { original: string; edited?: boolean }
 export interface ShotDraft { shot: ShotLink; kind: MediaKind; editor: Composer; updated: number }
 export interface Comparison { id: string; jobIds: [string, string]; selected: string | null }
 export type PerformanceMode = 'auto' | 'eco' | 'performance'

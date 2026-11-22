@@ -210,9 +210,11 @@ export async function exerciseGenerationOptimization({ page, base, fixture, reco
   await prompt().fill(fallbackPrompt)
   await button('优化后生成视频').click()
   await dialog().getByRole('alert').waitFor()
+  const revisedFallback = fallbackPrompt + ' 镜头保持三秒。'
+  await dialog().getByLabel('优化原文').fill(revisedFallback)
   await button('用原文生成').click()
-  await checkJob(fallbackPrompt, 0)
-  assert.deepEqual(fixture.videos[1].input, { prompt: fallbackPrompt })
+  await checkJob(revisedFallback, 0)
+  assert.deepEqual(fixture.videos[1].input, { prompt: revisedFallback })
   await prompt().fill(textVideoPrompt)
   await button('优化后生成视频').click()
   await seeProposal(textVideoProposal)

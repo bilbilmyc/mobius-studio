@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "mobius-studio"
-version = "2.10.0"
+version = "2.10.1"
 dependencies = [
  "axum",
  "base64 0.22.1",

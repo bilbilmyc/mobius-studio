@@ -342,6 +342,15 @@ function App() {
   function optimizeCurrent(mode: OptimizationMode) {
     requestOptimization({ kind, prompt, mode, references })
   }
+  function editOptimization(edit: (old: Composer) => Composer) {
+    promptRequests.clear(promptScope)
+    change(edit)
+    const nextPrompt = workspace.get(kind, shot).prompt
+    setGenerationReview(current => {
+      if (current?.scope !== promptScope || (current.input.prompt === nextPrompt && !current.error)) return current
+      return { ...current, input: { ...current.input, prompt: nextPrompt }, error: '' }
+    })
+  }
   const attempt = async (fn: () => Promise<unknown>) => {
     try {
       await fn()
@@ -996,8 +1005,8 @@ function App() {
                   <Prompt
                     value={prompt}
                     change={text}
-                    tools={<PromptOptimizer key={promptScope} kind={kind} shotLabel={shot?.label} composer={composer}
-                      writer={integrations?.writer} activity={promptRequests.entries.get(promptScope)} change={change}
+                    tools={<PromptOptimizer key={promptScope} kind={kind} shotLabel={shot?.label} composer={composer} references={references}
+                      writer={integrations?.writer} activity={promptRequests.entries.get(promptScope)} change={editOptimization}
                       configure={() => settingsPage('writer')} start={optimizeCurrent}
                       generation={review ? {
                         input: review.input, models: [native ? currentTemplate.Name : selectedModel, peer?.name].filter(Boolean).join(' / '),
