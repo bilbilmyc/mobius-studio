@@ -103,7 +103,7 @@ export async function runPromptTurn(
   ]
   const sources: PromptSource[] = []
   const id = crypto.randomUUID().replaceAll('-', '')
-  const targetKey = JSON.stringify([target.base, target.model])
+  const targetKey = JSON.stringify([target.id, target.base, target.model])
   let native = !jsonOnlyTargets.has(targetKey)
   let observations: { id: string; content: string }[] = []
   const cancel = () => {

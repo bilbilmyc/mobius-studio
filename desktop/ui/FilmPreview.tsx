@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from './ipc'
 import type { JobView, Picked, Script, ShotLink } from '../shared'
 import { Modal } from './Editor'
 async function captureCurrent(video: HTMLVideoElement, id: string, seconds: number): Promise<Picked> {

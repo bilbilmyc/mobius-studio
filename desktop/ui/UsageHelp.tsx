@@ -14,7 +14,7 @@ export function ServiceError({ message, context, configure }: {
   </div>
 }
 
-export function UsageHelp({ close, settings }: { close: () => void; settings: (target: 'writer' | 'media') => void }) {
+export function UsageHelp({ close, settings }: { close: () => void; settings: (target: 'writer' | 'media' | 'files') => void }) {
   return <Modal title="使用帮助" close={close}>
     <div className="dialog-body usage-help">
       <details open><summary>第一次使用，在哪里连接模型？</summary>
@@ -33,6 +33,10 @@ export function UsageHelp({ close, settings }: { close: () => void; settings: (t
       <details><summary>任务报错，怎样继续？</summary>
         <p>在「后台任务 → 待处理」打开任务详情。查询中断可继续查询原任务，下载中断可重新下载结果。已经返回失败的任务可复用参数，修改后再生成会创建新任务。</p>
         <p>技术详情里保留服务返回的信息。「复制排查信息」包含任务号、模型、时间和已收到的 HTTP 或官网状态码，可交给服务商定位问题。</p>
+      </details>
+      <details><summary>应用报错后，在哪里找日志？</summary>
+        <p>在「设置 → 文件与工具 → 运行日志」打开目录，按报错时间查看 mobius.log。生成任务的详细原因在「后台任务 → 待处理」中。</p>
+        <button onClick={() => settings('files')}>查看运行日志位置</button>
       </details>
     </div>
     <footer className="modal-actions"><button onClick={close}>关闭帮助</button></footer>

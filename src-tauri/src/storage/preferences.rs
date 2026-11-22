@@ -1,19 +1,12 @@
 use crate::{
-    domain::{canonical_base, id, Profile, Result},
+    domain::{id, Profile, Result},
     storage::files::{read, save},
-    storage::store::Store,
+    storage::{store::Store, writers::WriterConnection},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-fn writer_default() -> Profile {
-    Profile {
-        id: id(),
-        base_url: "https://api.deepseek.com".into(),
-        model: "deepseek-v4-pro".into(),
-        ..Default::default()
-    }
-}
+pub use super::writers::WriterInput;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -45,8 +38,9 @@ pub enum StorageProvider {
 pub struct Preferences {
     pub developer_mode: bool,
     pub performance: PerformanceMode,
-    #[serde(default = "writer_default")]
-    pub writer: Profile,
+    pub writer: WriterConnection,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub other_writers: Vec<WriterConnection>,
     pub storage: StorageTarget,
     pub storage_key: Profile,
 }
@@ -58,14 +52,6 @@ pub enum PerformanceMode {
     Auto,
     Eco,
     Performance,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WriterInput {
-    pub base: String,
-    pub model: String,
-    pub key: String,
 }
 
 impl Store {
@@ -84,7 +70,6 @@ impl Store {
             return Ok(p);
         }
         Ok(Preferences {
-            writer: writer_default(),
             storage: StorageTarget {
                 provider: StorageProvider::Aliyun,
                 region: "cn-hangzhou".into(),
@@ -100,7 +85,8 @@ impl Store {
         Ok(json!({
             "developerMode": p.developer_mode,
             "performance": p.performance,
-            "writer": {"base":p.writer.base_url,"model":p.writer.model,"hasKey":self.vault.has(&p.writer,&p.writer.base_url)},
+            "writer": self.writer_view(&p.writer),
+            "writers": p.writers().map(|c| self.writer_view(c)).collect::<Vec<_>>(),
             "storage": p.storage,
             "hasStorageKey": self.vault.has(&p.storage_key,&p.storage.endpoint)
         }))
@@ -123,7 +109,7 @@ impl Store {
     }
 
     // Stage new credentials under a separate account until the settings file commits.
-    fn credential(
+    pub(super) fn credential(
         &self,
         old: &Profile,
         base: &str,
@@ -142,26 +128,17 @@ impl Store {
         Ok(next)
     }
 
-    fn commit_preferences(&self, p: &Preferences, old: &Profile, next: &Profile) -> Result<()> {
+    pub(super) fn commit_preferences(
+        &self,
+        p: &Preferences,
+        old: &Profile,
+        next: &Profile,
+    ) -> Result<()> {
         let result = save(&self.home.join("settings.json"), p);
         if old.id != next.id {
             self.vault.forget(if result.is_ok() { old } else { next });
         }
         result
-    }
-
-    pub fn save_writer(&self, input: WriterInput) -> Result<()> {
-        let _lock = self.gate.lock().unwrap();
-        let mut p = self.preferences()?;
-        let base = canonical_base(&input.base)?;
-        let model = input.model.trim();
-        if model.is_empty() || model.len() > 200 {
-            return Err("请填写剧本模型 ID。".into());
-        }
-        let old = p.writer;
-        p.writer = self.credential(&old, &base, true, &input.key)?;
-        p.writer.model = model.into();
-        self.commit_preferences(&p, &old, &p.writer)
     }
 
     pub fn save_storage(&self, mut target: StorageTarget, secret: &str) -> Result<()> {

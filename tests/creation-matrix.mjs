@@ -486,7 +486,7 @@ export async function exerciseCreation({
   assert.ok(saved)
   saved = await done(saved.id)
   assert.equal(saved.settings['params.seed'], 64)
-  await page.getByRole('group', { name: '最近提交的任务' }).filter({ hasText: prompt }).getByRole('button').click()
+  await page.locator('.detail-heading').getByText(prompt, { exact:true }).waitFor()
   await page.getByRole('button', { name: '复用参数' }).click()
   await first.locator('.asset-thumb').waitFor()
   assert.match(await last.innerText(), /tail.png/)

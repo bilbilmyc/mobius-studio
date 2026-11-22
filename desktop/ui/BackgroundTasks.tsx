@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { jobStatusGroup, siteTemplate, statusLabels, type JobStatusGroup, type JobView } from '../shared'
+import { jobStatusGroup, siteTemplate, statusLabels, type JobStatusGroup, type JobView, type ScriptRun } from '../shared'
 import { Modal } from './Editor'
 import { paginate, PageControls } from './LibraryPages'
 import { canResume, taskGuidance, useVisibleTime } from './taskHelp'
@@ -43,23 +43,45 @@ function TaskRow({ job, inspect, now }: { job: JobView; inspect: (job: JobView) 
   )
 }
 
-export function BackgroundTasks({ jobs, inspect }: { jobs: JobView[]; inspect: (job: JobView) => void }) {
+type Task = JobView | ScriptRun
+function statusGroup(task: Task): JobStatusGroup {
+  if ('kind' in task) return jobStatusGroup(task.status)
+  return task.status === 'writing' ? 'active' : task.status === 'done' ? 'done' : 'attention'
+}
+const scriptStates: Record<ScriptRun['status'], string> = { writing: '正在编写', done: '已保存', failed: '生成失败', interrupted: '已中断' }
+
+function ScriptTaskRow({ run, inspect }: { run: ScriptRun; inspect: () => void }) {
+  return <li className="task-row" data-group={statusGroup(run)}>
+    <div className="task-copy">
+      <strong title={run.brief}>{run.title || run.brief}</strong>
+      <small>{['剧本', run.count + ' 个分镜', run.service, run.model, timeFormat.format(run.created)].filter(Boolean).join(' · ')}</small>
+      {(run.error || run.title) && <span className="task-detail" title={run.error || run.brief}>{run.error || run.brief}</span>}
+    </div>
+    <span className="task-state">{scriptStates[run.status]}</span>
+    <div className="task-actions"><button onClick={inspect}>
+      {run.status === 'writing' ? '查看进度' : run.status === 'done' ? '查看剧本' : '查看详情'}
+    </button></div>
+  </li>
+}
+
+export function BackgroundTasks({ jobs, scriptRuns, inspect, inspectScript }: {
+  jobs: JobView[]; scriptRuns: ScriptRun[]; inspect: (job: JobView) => void; inspectScript: (run: ScriptRun) => void
+}) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
   const [page, setPage] = useState(1)
   const groups = useMemo(() => {
-    const lists: Record<JobStatusGroup, JobView[]> = { active: [], attention: [], done: [] }
-    for (const job of jobs) lists[jobStatusGroup(job.status)].push(job)
+    const lists: Record<Filter, Task[]> = { all: [...jobs, ...scriptRuns].sort((a, b) => b.created - a.created), active: [], attention: [], done: [] }
+    for (const task of lists.all) lists[statusGroup(task)].push(task)
     return lists
-  }, [jobs])
+  }, [jobs, scriptRuns])
   const active = groups.active.length
   const now = useVisibleTime(open && active > 0, 15000)
   function select(next: Filter) {
     setFilter(next)
     setPage(1)
   }
-  const list = filter === 'all' ? jobs : groups[filter]
-  const visible = paginate(list, page, 20)
+  const visible = paginate(groups[filter], page, 20)
   return <>
     <button className="tasks-launcher" aria-label="后台任务" aria-haspopup="dialog"
       aria-describedby="task-count" onClick={() => { select(active ? 'active' : groups.attention.length ? 'attention' : 'all'); setOpen(true) }}>
@@ -74,13 +96,15 @@ export function BackgroundTasks({ jobs, inspect }: { jobs: JobView[]; inspect: (
       <div className="task-filters" role="group" aria-label="筛选后台任务">
         {(Object.keys(filters) as Filter[]).map(key => (
           <button key={key} aria-pressed={key === filter} onClick={() => select(key)}>
-            {filters[key]} <span>{key === 'all' ? jobs.length : groups[key].length}</span>
+            {filters[key]} <span>{groups[key].length}</span>
           </button>
         ))}
       </div>
       {visible.items.length ? (
         <ul className="task-rows" key={filter + visible.page} aria-label={filters[filter] + '任务'}>
-          {visible.items.map(job => <TaskRow key={job.id} job={job} now={now} inspect={j => { setOpen(false); inspect(j) }} />)}
+          {visible.items.map(task => 'kind' in task
+            ? <TaskRow key={task.id} job={task} now={now} inspect={j => { setOpen(false); inspect(j) }} />
+            : <ScriptTaskRow key={task.id} run={task} inspect={() => { setOpen(false); inspectScript(task) }} />)}
         </ul>
       ) : (
         <div className="task-empty">

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from './ipc'
 import type { Picked } from '../shared'
 import { Modal } from './Editor'
 export function MaskEditor({

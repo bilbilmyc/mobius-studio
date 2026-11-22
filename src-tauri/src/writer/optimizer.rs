@@ -129,6 +129,7 @@ mod tests {
                 base,
                 model: "text-test".into(),
                 key: "writer-test".into(),
+                ..Default::default()
             })
             .unwrap();
         for bad in ["length", "filter", "refusal", "empty"] {

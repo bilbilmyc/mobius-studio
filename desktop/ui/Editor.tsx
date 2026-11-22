@@ -1,4 +1,5 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 export function Modal({
   title,
@@ -27,12 +28,13 @@ export function Modal({
       aria-label={title}
       onCancel={(e) => {
         e.preventDefault()
+        e.stopPropagation()
         close()
       }}
     >
       <div className="dialog-title">
         <h2>{title}</h2>
-        <button className="icon-btn" aria-label="关闭" onClick={close}>
+        <button type="button" className="icon-btn" aria-label="关闭" onClick={close}>
           ×
         </button>
       </div>
@@ -45,62 +47,84 @@ const segmenter =
     ? new Intl.Segmenter('zh', { granularity: 'grapheme' })
     : null
 function count(s: string) {
-  return segmenter ? [...segmenter.segment(s)].length : Array.from(s).length
+  let length = 0
+  for (const _ of segmenter?.segment(s) ?? s) length++
+  return length
 }
-export function Prompt({
+function selectionOf(input: HTMLTextAreaElement) {
+  return [input.selectionStart, input.selectionEnd, input.selectionDirection] as const
+}
+
+export function ExpandableText({
+  id,
+  label,
   value,
   change,
-  hint,
+  placeholder,
+  rows = 4,
+  required,
+  maxLength,
+  autoGrow = false,
   tools,
 }: {
+  id?: string
+  label: string
   value: string
   change: (s: string) => void
-  hint: string
+  placeholder?: string
+  rows?: number
+  required?: boolean
+  maxLength?: number
+  autoGrow?: boolean
   tools?: React.ReactNode
 }) {
+  const generatedId = useId()
+  const inputId = id ?? generatedId
   const box = useRef<HTMLTextAreaElement>(null),
     big = useRef<HTMLTextAreaElement>(null)
-  const [original, setOriginal] = useState<string | null>(null),
-    selection = useRef([0, 0])
+  const [original, setOriginal] = useState<string | null>(null)
+  const selection = useRef<ReturnType<typeof selectionOf>>([0, 0, 'none'])
+  const expanded = original !== null
+  const counter = useMemo(() => {
+    if (!autoGrow && !expanded) return ''
+    if (maxLength !== undefined) return value.length.toLocaleString('zh-CN') + ' / ' + maxLength.toLocaleString('zh-CN')
+    return count(value) + ' 字'
+  }, [autoGrow, expanded, maxLength, value])
   useLayoutEffect(() => {
     const el = box.current
-    if (el) {
+    if (autoGrow && el) {
       el.style.height = 'auto'
       el.style.height = Math.min(206, Math.max(98, el.scrollHeight + 2)) + 'px'
     }
-  }, [value, hint])
-  const expanded = original !== null
+  }, [autoGrow, value, placeholder])
   useEffect(() => {
-    if (expanded && big.current) {
-      big.current.focus()
-      big.current.setSelectionRange(selection.current[0], selection.current[1])
-    }
+    if (expanded) big.current?.setSelectionRange(...selection.current)
   }, [expanded])
   function finish(save: boolean) {
     const pos =
       save && big.current
-        ? [big.current.selectionStart, big.current.selectionEnd]
+        ? selectionOf(big.current)
         : selection.current
     if (!save && original !== null && value !== original) change(original)
     setOriginal(null)
     requestAnimationFrame(() => {
-      box.current?.focus()
-      box.current?.setSelectionRange(pos[0], pos[1])
+      box.current?.focus({ preventScroll: true })
+      box.current?.setSelectionRange(...pos)
     })
   }
   return (
-    <section className="prompt">
+    <div className={autoGrow ? 'prompt' : 'writing-field'}>
       <div className="label-row">
-        <label htmlFor="prompt">提示词</label>
-        <small>{count(value)} 字</small>
+        <label id={inputId + '-label'} htmlFor={inputId}>{label}</label>
+        {autoGrow && <small>{counter}</small>}
         {tools}
         <button
+          type="button"
           className="link"
+          aria-haspopup="dialog"
+          aria-describedby={inputId + '-label'}
           onClick={() => {
-            selection.current = [
-              box.current!.selectionStart,
-              box.current!.selectionEnd,
-            ]
+            selection.current = selectionOf(box.current!)
             setOriginal(value)
           }}
         >
@@ -108,20 +132,24 @@ export function Prompt({
         </button>
       </div>
       <textarea
-        id="prompt"
+        id={inputId}
         ref={box}
-        rows={4}
-        placeholder={hint}
+        rows={rows}
+        required={required}
+        maxLength={maxLength}
+        placeholder={placeholder}
         value={value}
         onChange={(e) => change(e.target.value)}
         spellCheck={false}
       />
-      {expanded && (
-        <Modal title="编辑提示词" close={() => finish(false)} wide>
+      {expanded && createPortal(
+        <Modal title={'编辑' + label} close={() => finish(false)} initialFocus={big} wide>
           <textarea
             ref={big}
             className="big-editor"
-            aria-label="完整提示词"
+            aria-label={'完整' + label}
+            maxLength={maxLength}
+            placeholder={placeholder}
             spellCheck={false}
             value={value}
             onChange={(e) => change(e.target.value)}
@@ -138,14 +166,15 @@ export function Prompt({
             }}
           />
           <footer className="modal-actions">
-            <small>{count(value)} 字　·　Ctrl / ⌘ + Enter 完成</small>
-            <button onClick={() => finish(false)}>取消</button>
-            <button className="primary" onClick={() => finish(true)}>
+            <small>{counter}　·　Ctrl / ⌘ + Enter 完成</small>
+            <button type="button" onClick={() => finish(false)}>取消</button>
+            <button type="button" className="primary" onClick={() => finish(true)}>
               完成
             </button>
           </footer>
-        </Modal>
+        </Modal>,
+        document.body,
       )}
-    </section>
+    </div>
   )
 }

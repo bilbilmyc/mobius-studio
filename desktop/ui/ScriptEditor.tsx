@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { Scene, Script } from '../shared'
-import { Modal } from './Editor'
+import { ExpandableText, Modal } from './Editor'
 
-const fields = { heading: '场景', action: '画面与动作', dialogue: '台词或旁白', imagePrompt: '图片提示词', videoPrompt: '视频提示词' }
-type Field = keyof typeof fields
+const longFields = { action: '画面与动作', dialogue: '台词或旁白', imagePrompt: '图片提示词', videoPrompt: '视频提示词' }
+type LongField = keyof typeof longFields
+type Field = 'heading' | LongField
 const newId = () => crypto.randomUUID().replaceAll('-', '')
 const blank = (): Scene => ({ id: newId(), heading: '', action: '', dialogue: '', imagePrompt: '', videoPrompt: '' })
 const marker = /^(?:(?:第\s*)?[零〇一二两三四五六七八九十百\d]+\s*镜(?:头)?|(?:分镜|镜头|shot)\s*[零〇一二两三四五六七八九十百\d]+|\d+[.．、)）])[\s：:、.．\-—]*/i
@@ -71,9 +72,12 @@ export function ScriptEditor({ initial, close, saved, beforeSave }: {
   function insert(at: number, scene: Scene) {
     setScenes(all => [...all.slice(0, at), scene, ...all.slice(at)])
   }
+  function changeField(id: string, field: Field, value: string) {
+    setScenes(all => all.map(scene => scene.id === id ? { ...scene, [field]: value } : scene))
+  }
   async function save() {
     const all = [...scenes, ...parseShots(paste)]
-    if (!all.length) { setError('请粘贴分镜或添加一镜。'); return }
+    if (!all.length) { setError('请填写分镜正文或添加一镜。'); return }
     const story = { title: title.trim(), scenes: all.map((s, i) => ({ ...s, heading: s.heading.trim() || '镜头 ' + (i + 1),
       imagePrompt: s.imagePrompt.trim() || s.action, videoPrompt: s.videoPrompt.trim() || s.action })) }
     setError(''); setBusy(true)
@@ -85,14 +89,14 @@ export function ScriptEditor({ initial, close, saved, beforeSave }: {
   return <Modal wide title={initial ? '编辑剧本' : '手工分镜'} close={() => { if (!busy) close() }}>
     <form onSubmit={e => { e.preventDefault(); void save() }}>
       <div className="dialog-body fields shot-editor"><label>剧本标题<input required maxLength={200} value={title} onChange={e => setTitle(e.target.value)} /></label>
-        {pasteOpen ? <div className="paste-shots"><label>粘贴分镜<textarea rows={4} value={paste} onChange={e => setPaste(e.target.value)}
-          placeholder={'镜头 1 雨中的街口\n镜头 2 清晨的站台'} /></label>
+        {pasteOpen ? <div className="paste-shots"><ExpandableText label="分镜正文" value={paste} change={setPaste}
+          placeholder={'镜头 1 雨中的街口\n镜头 2 清晨的站台'} />
           <small>每行一镜。多行描述可用“镜头 1”“镜头 2”分段，也可填写场景、画面、台词和提示词。</small>
           <button type="button" disabled={!paste.trim()} onClick={() => {
             const parsed = parseShots(paste)
             if (!parsed.length) { setError('请在镜头编号后填写内容。'); return }
             setScenes(old => [...old, ...parsed]); setPaste(''); showPaste(false); setError('')
-          }}>拆分并预览</button></div> : <button type="button" onClick={() => showPaste(true)}>粘贴更多分镜</button>}
+          }}>拆分并预览</button></div> : <button type="button" onClick={() => showPaste(true)}>续写或粘贴分镜</button>}
         {scenes.map((scene, index) => <fieldset key={scene.id}
           onDragOver={e => { if (e.dataTransfer.types.includes('application/x-mobius-scene')) e.preventDefault() }}
           onDrop={e => { const id = e.dataTransfer.getData('application/x-mobius-scene'); if (id) { e.preventDefault(); move(scenes.findIndex(s => s.id === id), index) } }}>
@@ -105,10 +109,12 @@ export function ScriptEditor({ initial, close, saved, beforeSave }: {
             <button type="button" onClick={() => insert(index + 1, { ...scene, id: newId() })}>复制</button>
             <button type="button" onClick={() => setScenes(all => all.filter(s => s.id !== scene.id))}>移除</button>
           </div>
-          {(Object.keys(fields) as Field[]).map(k => <label key={k}>{fields[k]}
-            <textarea rows={k === 'heading' ? 1 : 2} required={k === 'action'} maxLength={12000} value={scene[k]}
-              placeholder={k === 'imagePrompt' || k === 'videoPrompt' ? '默认使用画面与动作' : undefined}
-              onChange={e => setScenes(all => all.map(s => s.id === scene.id ? { ...s, [k]: e.target.value } : s))} /></label>)}
+          <label>场景<textarea rows={1} maxLength={12000} value={scene.heading}
+            onChange={e => changeField(scene.id, 'heading', e.target.value)} /></label>
+          {(Object.keys(longFields) as LongField[]).map(field => <ExpandableText key={field} label={longFields[field]}
+            rows={2} required={field === 'action'} maxLength={12000} value={scene[field]}
+            placeholder={field === 'imagePrompt' || field === 'videoPrompt' ? '默认使用画面与动作' : undefined}
+            change={value => changeField(scene.id, field, value)} />)}
         </fieldset>)}
         <button type="button" onClick={() => insert(scenes.length, blank())}>添加分镜</button>
       </div>

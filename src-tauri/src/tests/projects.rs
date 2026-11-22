@@ -1,6 +1,6 @@
 use crate::{
     domain::ShotLink,
-    domain::{id, Job, Profile},
+    domain::{id, Job, Profile, ServiceGroup},
     generation::jobs::Studio,
     projects::project_archive,
     projects::shot_drafts::ShotDraft,
@@ -26,6 +26,7 @@ fn source(home: &std::path::Path) -> (Store, String, String, String) {
     let p = Profile {
         id: id(),
         name: "绘图".into(),
+        service_group: ServiceGroup::Direct,
         model: "paint".into(),
         protocol_id: "openai-image".into(),
         base_url: "https://example.invalid/v1".into(),
@@ -105,6 +106,7 @@ fn project_restores_assets_connections_provenance_and_never_restarts_paid_work()
     assert_ne!(profile, old_profile);
     let p = target.resolve(profile, "image").unwrap();
     assert_eq!(p.model, "paint");
+    assert_eq!(p.service_group, ServiceGroup::Direct);
     assert!(p.keys.is_empty());
     let key = serde_json::to_string(&[profile, "image", &p.base_url, "paint"]).unwrap();
     let variant = &d.editor["variants"][key];

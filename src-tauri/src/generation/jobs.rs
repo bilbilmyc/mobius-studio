@@ -26,6 +26,7 @@ fn retry_deadline(delay: Duration) -> i64 {
 
 pub struct Studio {
     pub store: Store,
+    pub(crate) script_runs: crate::writer::script_runs::ScriptRuns,
     pub http: reqwest::Client,
     pub(crate) cloud_transfer: tokio::sync::Mutex<()>,
     active: Mutex<HashSet<String>>,
@@ -40,6 +41,7 @@ impl Studio {
         notify: impl Fn(Option<&str>) + Send + Sync + 'static,
     ) -> Result<Self> {
         Ok(Self {
+            script_runs: crate::writer::script_runs::ScriptRuns::load(&store)?,
             has_batches: std::sync::atomic::AtomicBool::new(store.home.join("批次").is_dir()),
             batch_gate: Default::default(),
             store,
@@ -257,13 +259,16 @@ impl Studio {
                 } else {
                     "uncertain"
                 };
-                let _ = s.update(&mut j, status, &err.message);
+                crate::diagnostics::task_failure(&j.id, &j.status, status, &err.message);
+                if let Err(e) = s.update(&mut j, status, &err.message) {
+                    crate::diagnostics::failure("save-job", &e);
+                }
             }
             active.remove(&j.id);
             drop(active);
             if s.has_batches.load(std::sync::atomic::Ordering::Relaxed) {
                 if let Err(e) = s.dispatch() {
-                    eprintln!("批次调度失败：{e}");
+                    crate::diagnostics::failure("dispatch-batch", &e);
                 }
             }
         });

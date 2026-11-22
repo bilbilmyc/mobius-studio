@@ -53,6 +53,7 @@ pub(crate) async fn studio_state(app: AppHandle, s: Core<'_>) -> Result<Value> {
         let mut labels = ShotLabels::new();
         let jobs = core.store.jobs()?.iter().map(|j|view(&app,&core,j,&mut labels)).collect::<Vec<_>>();
         let state = json!({
+            "scriptRuns": core.script_runs.list(),
             "modelFeatures":core.store.feature_map()?,
             "profiles": profiles.iter().map(|p|core.store.profile_view(p)).collect::<Vec<_>>(),
             "official": core.store.profile_view(&official), "jobs": jobs, "comparisons":core.store.comparisons()?, "keyStorage": vault::Vault::note(),

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import {
   CustomSource, EncodedPacketSink, EncodedVideoPacketSource, Input, MP4, QTFF, WEBM,
   Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat,

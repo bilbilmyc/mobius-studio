@@ -20,7 +20,9 @@ pub struct Lookup {
 #[derive(Deserialize)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum Source {
-    Writer,
+    Writer {
+        id: Option<String>,
+    },
     Comfy {
         id: Option<String>,
     },
@@ -48,12 +50,16 @@ impl Studio {
             };
         let mut key = input.key.trim().to_owned();
         let scheme = match &input.source {
-            Source::Writer | Source::Comfy { .. } => "bearer",
+            Source::Writer { .. } | Source::Comfy { .. } => "bearer",
             Source::Connection { auth, .. } => auth.as_deref().unwrap_or("bearer"),
         };
         if key.is_empty() && scheme != "none" {
             let saved = match &input.source {
-                Source::Writer => Some(self.store.preferences()?.writer),
+                Source::Writer { id } => match id.as_deref() {
+                    Some("@new") => None,
+                    Some(id) => Some(self.store.preferences()?.find_writer(id)?.profile.clone()),
+                    None => Some(self.store.preferences()?.writer.profile),
+                },
                 Source::Connection { id: Some(id), .. } | Source::Comfy { id: Some(id) } => {
                     self.store.profiles()?.into_iter().find(|p| &p.id == id)
                 }
@@ -69,7 +75,7 @@ impl Studio {
             request_catalog(&self.http, base, url.path() == "/", scheme, &key).await
         }
         .map_err(|e| e.message)?;
-        if !matches!(input.source, Source::Writer) {
+        if !matches!(input.source, Source::Writer { .. }) {
             self.store.remember_catalog(&catalog)?;
         }
         Ok(catalog)

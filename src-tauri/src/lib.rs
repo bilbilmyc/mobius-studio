@@ -1,7 +1,9 @@
 mod app;
 mod commands;
 mod connections;
+mod desktop_window;
 mod developer;
+mod diagnostics;
 mod domain;
 mod generation;
 mod library;

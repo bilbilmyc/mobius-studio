@@ -1,23 +1,22 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { presets, profileModels, type Integrations, type ProfileView, type StorageTarget } from '../shared'
-import { ModelPicker, useModelCatalog } from './ModelPicker'
+import type { Integrations, StorageTarget } from '../shared'
+import { WriterConnections, type WriterSelection } from './WriterConnections'
 import storageProviders from '../../src/StorageProviders.json'
 import { MediaToolSettings } from './MediaToolSettings'
+import { RuntimeSettings } from './RuntimeSettings'
 import { PerformanceSettings } from './PerformanceSettings'
 import { DeveloperSettings } from './RequestHistory'
+import { MediaConnections, type MediaConnectionProps } from './MediaConnections'
 
 const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', performance: '性能', files: '文件与工具', developer: '开发者模式' }
 export type SettingsSection = keyof typeof sections
 
-interface Props {
+interface Props extends MediaConnectionProps, WriterSelection {
   section: SettingsSection
   select: (section: SettingsSection) => void
   integrations?: Integrations
+  editActiveWriter: boolean
   reload: () => Promise<void>
-  profiles: ProfileView[]
-  official?: ProfileView
-  edit: (official: boolean, profile?: ProfileView) => void
-  remove: (profile: ProfileView) => void
   keyStorage: string
   website: () => void
   folder: () => void
@@ -30,26 +29,17 @@ export function Settings(props: Props) {
       {(Object.keys(sections) as SettingsSection[]).map(k =>
         <button key={k} aria-current={section === k ? 'page' : undefined} onClick={() => props.select(k)}>{sections[k]}</button>)}
     </nav>
-    <div className="preferences-content" key={section}>
+    <div className={section === 'media' || section === 'writer' ? 'preferences-content media-preferences' : 'preferences-content'} key={section}>
       <h2>{sections[section]}</h2>
-      {section === 'media' && <>
-        <div className="preference-row"><div><h3>AIGC 创作空间 · 官网</h3>
-          <p>图片与视频共用官网 Key · {official?.hasKey ? '已配置' : '待配置'}</p></div>
-          <button onClick={() => props.edit(true, official)}>配置官网 Key</button></div>
-        <div className="preference-row"><div><h3>模型厂商与中转站</h3><p>为图片或视频添加独立的服务与模型。</p></div>
-          <button onClick={() => props.edit(false)}>添加模型服务</button></div>
-        {props.profiles.map(p => <div key={p.Id} className="preference-row saved-profile">
-          <div><b>{p.Name}</b><p>{presets[p.ProtocolId]?.title} · {p.Model}{!!p.Models?.length && ` 等 ${profileModels(p).length} 个模型`}</p><small>{p.BaseUrl}</small></div>
-          <button aria-label={`编辑 ${p.Name}`} onClick={() => props.edit(false, p)}>编辑</button>
-          <button aria-label={`移除 ${p.Name}`} onClick={() => props.remove(p)}>移除</button></div>)}
-      </>}
-      {section === 'writer' && integrations && <WriterForm data={integrations.writer} reload={props.reload} />}
+      {section === 'media' && <MediaConnections profiles={props.profiles} official={official} edit={props.edit} remove={props.remove} />}
+      {section === 'writer' && integrations && <WriterConnections data={integrations} reload={props.reload} editActive={props.editActiveWriter}
+        selectWriter={props.selectWriter} switchingWriter={props.switchingWriter} />}
       {section === 'storage' && integrations && <StorageForm data={integrations} reload={props.reload} />}
       {section === 'performance' && integrations && <PerformanceSettings mode={integrations.performance} reload={props.reload} />}
       {section === 'developer' && integrations && <DeveloperSettings enabled={integrations.developerMode} reload={props.reload}/>}
       {(section === 'writer' || section === 'storage' || section === 'performance' || section === 'developer') && !integrations &&
         <button onClick={() => void props.reload().catch(() => {})}>重新读取设置</button>}
-      {section === 'files' && <><MediaToolSettings/>
+      {section === 'files' && <><RuntimeSettings/><MediaToolSettings/>
         <div className="preference-row"><div><h3>本地作品</h3><p>查看已保存的原图、视频和导出副本。</p></div>
           <button onClick={props.folder}>打开作品目录</button></div>
         <div className="preference-row"><div><h3>网站工作台</h3><p>复制创作台的当前提示词，并打开官网。</p></div>
@@ -76,26 +66,6 @@ function useSave(reload: () => Promise<void>) {
     } finally { setBusy(false) }
   }
   return { submit, busy, clearFeedback: () => setMessage(''), feedback: <span role="status" className={failed ? 'error' : 'help'}>{message}</span> }
-}
-
-function WriterForm({ data, reload }: { data: Integrations['writer']; reload: Props['reload'] }) {
-  const [base, setBase] = useState(data.base), [model, setModel] = useState(data.model), [key, setKey] = useState('')
-  const catalog = useModelCatalog({ source: 'writer', base, key })
-  const { submit, busy, feedback } = useSave(reload)
-  return <form className="integration-form" onSubmit={e => void submit(e, async () => {
-    const apiBase = catalog.baseForSave(data.hasKey ? data.base : undefined, true)
-    await window.studio.saveWriter({ base: apiBase, model, key })
-    setBase(apiBase.trim().replace(/\/+$/, ''))
-    setKey('')
-  })}>
-    <p>剧本和提示词优化共用这条文本模型连接。支持 Chat Completions 兼容服务，生成剧本还需要模型支持 JSON 输出。</p>
-    <label>剧本服务地址<input type="url" required disabled={busy} value={base} onChange={e => { setBase(e.target.value); setKey('') }} /></label>
-    <label>剧本 API Key<input type="password" autoComplete="new-password" disabled={busy} value={key} onChange={e => setKey(e.target.value)}
-      placeholder={data.hasKey && base.trim().replace(/\/+$/, '') === data.base ? '已保存，留空沿用' : '输入这个服务的 API Key'} /></label>
-    <ModelPicker label="剧本模型 ID" value={model} change={setModel} catalog={catalog}
-      canFetch={!!base.trim()} disabled={busy} hints={base.trim().replace(/\/+$/, '') === 'https://api.deepseek.com' ? ['deepseek-v4-pro', 'deepseek-flash'] : undefined} />
-    <div className="form-end"><button className="primary" disabled={busy || catalog.loading}>保存剧本模型</button>{feedback}</div>
-  </form>
 }
 
 function StorageForm({ data, reload }: { data: Integrations; reload: Props['reload'] }) {

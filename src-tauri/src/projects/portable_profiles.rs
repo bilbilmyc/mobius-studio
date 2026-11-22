@@ -1,5 +1,5 @@
 use crate::{
-    domain::{canonical_base, site, Controls, Profile, Result},
+    domain::{canonical_base, site, Controls, Profile, Result, ServiceGroup},
     storage::files::{read, save},
     storage::store::Store,
 };
@@ -14,6 +14,8 @@ use std::{
 pub(crate) struct Connection {
     id: String,
     name: String,
+    #[serde(default, rename = "serviceGroup")]
+    service_group: ServiceGroup,
     protocol: String,
     base: String,
     model: String,
@@ -39,6 +41,7 @@ pub(crate) fn describe(s: &Store, used: &HashSet<String>) -> Result<Vec<Connecti
             Connection {
                 id: p.id,
                 name: p.name,
+                service_group: p.service_group,
                 protocol: p.protocol_id,
                 base: p.base_url,
                 model: p.model,
@@ -120,6 +123,7 @@ pub(crate) fn install(s: &Store, stage: &Path) -> Result<()> {
         all.push(Profile {
             id: c.id,
             name: c.name,
+            service_group: c.service_group,
             protocol_id: c.protocol,
             base_url: c.base,
             model: c.model,

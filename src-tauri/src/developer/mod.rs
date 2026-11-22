@@ -127,7 +127,9 @@ pub(crate) async fn send(
 ) -> reqwest::Result<Response> {
     let outgoing = request.into();
     let Some(epoch) = epoch() else {
-        return outgoing.wire.send().await;
+        let result = outgoing.wire.send().await;
+        log_response(&result, destination);
+        return result;
     };
     let (client, request) = outgoing.wire.build_split();
     let request = request?;
@@ -141,11 +143,36 @@ pub(crate) async fn send(
         start: Instant::now(),
     };
     let result = client.execute(request).await;
+    log_response(&result, destination);
     pending.finish(
         result.as_ref().ok().map(Response::status),
         if result.is_ok() { "received" } else { "failed" },
     );
     result
+}
+
+fn log_response(result: &reqwest::Result<Response>, destination: Destination) {
+    let area = match destination {
+        Destination::Api => "http-api",
+        Destination::Media => "http-media",
+    };
+    match result {
+        Ok(reply) if reply.status().is_client_error() || reply.status().is_server_error() => {
+            crate::diagnostics::entry("WARN", area, &format!("HTTP {}", reply.status().as_u16()))
+        }
+        Err(e) => crate::diagnostics::entry(
+            "ERROR",
+            area,
+            if e.is_timeout() {
+                "等待超时"
+            } else if e.is_connect() {
+                "连接失败"
+            } else {
+                "网络请求中断"
+            },
+        ),
+        _ => {}
+    }
 }
 
 #[tauri::command]

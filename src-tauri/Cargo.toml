@@ -1,6 +1,6 @@
 [package]
 name = "mobius-studio"
-version = "2.13.0"
+version = "2.14.0"
 edition = "2021"
 description = "莫比环本地图片与视频工作台"
 build = "build.rs"
@@ -9,7 +9,8 @@ build = "build.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", default-features = false, features = ["wry", "compression", "protocol-asset", "common-controls-v6", "x11", "dbus"] }
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "protocol-asset", "common-controls-v6", "x11", "dbus", "tray-icon"] }
+dirs = "7"
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
@@ -42,6 +43,7 @@ windows-sys = {version = "0.61",features = ["Win32_Foundation", "Win32_Security_
 security-framework = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.8"
 axum = {version="0.8",default-features=false,features= ["http1", "tokio"] }
 tower-http = {version="0.6",features= ["fs"] }
 tower = {version="0.5",features= ["util"] }

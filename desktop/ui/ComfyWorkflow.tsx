@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import { Modal } from './Editor'
 type Nodes = Record<string, { class_type: string; inputs: Record<string, unknown> }>
 interface Graph {

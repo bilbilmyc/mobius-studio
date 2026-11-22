@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import type { JobView } from '../shared'
 interface Charge {
   amount: number

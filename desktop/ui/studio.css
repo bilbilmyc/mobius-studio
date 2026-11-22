@@ -210,7 +210,11 @@ main {
 .top {
   flex: none;
   min-height: 38px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px 16px;
 }
+.top h1 { flex: none; white-space: nowrap; }
 .work {
   min-height: 0;
   min-width: 0;
@@ -476,10 +480,15 @@ input[type='checkbox'] {
 }
 .label-row {
   margin-bottom: 5px;
+  flex-wrap: wrap;
 }
+.label-row > label { white-space: nowrap; }
 .label-row small {
   margin-left: auto;
 }
+.writing-field { min-width: 0; }
+.writing-field > .label-row { justify-content: space-between; }
+.writing-field > textarea { display: block; }
 .prompt > textarea {
   display: block;
   min-height: 98px;
@@ -741,6 +750,9 @@ dialog::backdrop {
 dialog.wide {
   width: min(800px, 91vw);
 }
+dialog.wide:has(> .big-editor) {
+  width: min(64rem, calc(100% - 24px));
+}
 dialog form {
   display: flex;
   flex-direction: column;
@@ -766,13 +778,16 @@ dialog form {
 }
 .modal-actions {
   justify-content: flex-end;
+  flex-wrap: wrap;
   padding: 9px 1px 1px;
 }
+.modal-actions button, .dialog-title button { flex: none; max-width: 100%; }
+.dialog-title h2 { min-width: 0; overflow-wrap: anywhere; }
 .modal-actions small {
   margin-right: auto;
 }
 .big-editor {
-  height: min(54vh, 540px);
+  height: min(60dvh, 46rem);
   min-height: 0;
   padding: 13px 15px;
   scrollbar-width: thin;
@@ -799,7 +814,7 @@ dialog form {
     padding-inline: 12px;
   }
 }
-@media (max-width: 620px) {
+@media (max-width: 700px) {
   .work {
     display: flex;
     flex-direction: column;
@@ -813,8 +828,9 @@ dialog form {
     height: 25vh;
     flex: none;
   }
+  .canvas:has(.job-preview[data-active='true']) { height: clamp(190px, 42dvh, 270px); }
   .detail {
-    max-height: 100px;
+    max-height: min(36vh, 220px);
   }
   .settings {
     flex: none;
@@ -825,4 +841,39 @@ dialog form {
   .status small {
     display: none;
   }
+}
+@media (max-width: 700px), (max-height: 540px) {
+  .job-preview[data-active='true'] { padding: 12px; }
+  .job-preview[data-active='true'] .preview-state-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    text-align: start;
+  }
+  .job-preview[data-active='true'] .preview-symbol { display: none; }
+  .job-preview[data-active='true'] .preview-state-content > :is([role='status'], .preview-stages, .task-guidance) { grid-column: 1 / -1; }
+  .job-preview[data-active='true'] h2 { font-size: 20px; }
+  .job-preview[data-active='true'] p { margin-top: 3px; }
+  .job-preview[data-active='true'] .preview-stages { width: 100%; margin: 2px 0; }
+  .job-preview[data-active='true'] .wait-time { justify-content: start; margin: 0; }
+  .job-preview[data-active='true'] .preview-state-content > button { justify-self: end; margin: 0; }
+}
+@media (max-width: 540px) {
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  main { grid-column: 1; grid-row: 1; padding: 10px 12px 4px; gap: 8px; }
+  .rail {
+    grid-column: 1; grid-row: 2; display: grid; grid-template-columns: 3fr 1fr;
+    gap: 4px; padding: 4px 8px; border: 0; border-top: 1px solid var(--line);
+  }
+  .rail .brand { display: none; }
+  .rail nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .rail .nav { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 8px 2px; white-space: nowrap; }
+  .rail .nav svg { width: 18px; height: 18px; }
+  .rail-settings { margin: 0; }
+  .top { gap: 7px 10px; }
+  .top .media-switch { margin-inline-start: auto; }
+  .top:has(.media-switch) .top-tools { flex-basis: 100%; justify-content: flex-start; }
+  dialog, dialog.wide { width: calc(100% - 20px); padding: 12px; max-height: calc(100dvh - 20px); }
+  dialog[open] { gap: 10px; }
 }

@@ -2,6 +2,24 @@ import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ModelCatalog, ModelLookup } from '../shared'
 import { ServiceError } from './UsageHelp'
 
+export const parseModelIds = (text: string) => text.split(/[\n,，]+/).map(value => value.trim()).filter(Boolean)
+
+export function AdditionalModels({ text, change, primary, catalog, hint }: {
+  text: string; change: (text: string) => void; primary: string; catalog: string[]; hint: string
+}) {
+  const chosen = new Set([primary, ...parseModelIds(text)])
+  return <details>
+    <summary>同一连接的其他模型</summary>
+    <label>备选模型 ID<textarea rows={3} value={text} placeholder={hint} onChange={e => change(e.target.value)} /></label>
+    {catalog.length > 0 && <label>从列表加入备选模型
+      <select value="" onChange={e => { if (e.target.value) change([text.trim(), e.target.value].filter(Boolean).join('\n')) }}>
+        <option value="">选择要加入的模型</option>
+        {catalog.filter(m => !chosen.has(m)).map(m => <option key={m}>{m}</option>)}
+      </select>
+    </label>}
+  </details>
+}
+
 export function useModelCatalog(query: ModelLookup) {
   const [result, setResult] = useState<ModelCatalog>()
   const [loading, setLoading] = useState(false), [error, setError] = useState('')

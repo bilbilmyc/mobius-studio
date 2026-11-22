@@ -1,6 +1,5 @@
 use crate::{
     domain::{id, valid_id, Result, ShotLink},
-    generation::jobs::Studio,
     storage::files::{read, save},
     storage::store::Store,
 };
@@ -213,51 +212,6 @@ impl Store {
         script.finals.retain(|key, _| ids.contains(key));
         script.story = story;
         self.save_script(&script)?;
-        Ok(script)
-    }
-}
-
-impl Studio {
-    pub async fn generate_script(&self, brief: String, count: usize) -> Result<Script> {
-        let brief = brief.trim();
-        if brief.is_empty() || brief.chars().count() > 12000 || !(1..=12).contains(&count) {
-            return Err("请填写 1 至 12000 字的故事构想，并选择 1 至 12 个分镜。".into());
-        }
-        let system = concat!(
-            "你是影视编剧。根据用户构想写中文分镜剧本。返回单个 JSON 对象，结构为 ",
-            r#"{"title":"片名","scenes":[{"heading":"内景或外景、地点、时间","action":"画面与动作","dialogue":"台词或旁白，无则空字符串","imagePrompt":"独立可用的画面提示词","videoPrompt":"独立可用的运镜和动作提示词"}]}。"#,
-            "各镜头的人物、服装和美术设定应保持连贯。"
-        );
-        let (model, reply) = self
-            .writer_completion(system, &format!("请写 {count} 个分镜。\n\n{brief}"), true)
-            .await?;
-        let choice = &reply["choices"][0];
-        if choice["finish_reason"] == "length" {
-            return Err("生成内容被截断，请减少分镜数后重试。".into());
-        }
-        let content = choice["message"]["content"]
-            .as_str()
-            .ok_or("剧本模型没有返回正文。")?;
-        let mut story: Screenplay = serde_json::from_str(content.trim())
-            .map_err(|_| "剧本模型返回的分镜格式不完整，请重试。")?;
-        if story.scenes.len() != count {
-            return Err(format!(
-                "模型返回了 {} 个分镜，预期 {count} 个，请重试。",
-                story.scenes.len()
-            ));
-        }
-        for scene in &mut story.scenes {
-            scene.id = id();
-        }
-        let script = Script {
-            finals: Default::default(),
-            id: id(),
-            created: chrono::Utc::now().timestamp_millis(),
-            model,
-            brief: brief.into(),
-            story,
-        };
-        self.store.save_script(&script)?;
         Ok(script)
     }
 }

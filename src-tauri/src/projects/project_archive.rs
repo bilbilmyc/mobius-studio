@@ -440,7 +440,7 @@ pub(crate) fn recover(s: &Store) -> Result<()> {
         if valid_id(&e.file_name().to_string_lossy()) && path.join("ready").is_file() {
             if let Err(reason) = install(s, &path) {
                 fs::rename(path.join("ready"), path.join("needs-review")).map_err(err)?;
-                eprintln!("项目恢复需要核对：{reason}");
+                crate::diagnostics::failure("recover-project", &reason);
                 continue;
             }
             fs::remove_dir_all(path).map_err(err)?;

@@ -10,6 +10,8 @@ use tauri::{Emitter, Manager, State};
 
 pub(crate) type Core<'a> = State<'a, Arc<Studio>>;
 pub fn run() {
+    let context = tauri::generate_context!();
+    crate::diagnostics::init(&context.config().identifier);
     let mut builder = tauri::Builder::default();
     #[cfg(feature = "render-benchmark")]
     if std::env::var_os("MOBIUS_RENDER_BENCHMARK").is_some()
@@ -23,19 +25,22 @@ pub fn run() {
     }
     if std::env::var_os("MOBIUS_HOME").is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            let _ = crate::desktop_window::restore(app);
         }));
     }
-    builder
+    let app = builder
+        .manage(crate::desktop_window::WindowState::default())
+        .on_window_event(crate::desktop_window::on_window_event)
         .manage(writer::tool_calls::Runs::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            crate::diagnostics::entry(
+                "INFO",
+                "startup",
+                concat!("莫比环 ", env!("CARGO_PKG_VERSION"), " 启动"),
+            );
             #[cfg(target_os = "linux")]
             if let Ok(server) = media::preview::Preview::start() {
                 app.manage(server);
@@ -92,9 +97,17 @@ pub fn run() {
             app.manage(core.clone());
             app.manage(media::video_export::VideoFiles::default());
             core.recover().map_err(std::io::Error::other)?;
+            if let Err(e) = crate::desktop_window::install(app.handle()) {
+                crate::diagnostics::failure("tray-init", &e.to_string());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::desktop_window::runtime_info,
+            crate::desktop_window::request_quit,
+            crate::desktop_window::finish_window_close,
+            crate::diagnostics::open_log_folder,
+            crate::diagnostics::report_runtime_issue,
             crate::developer::set_developer_mode,
             crate::developer::request_history,
             crate::developer::request_example,
@@ -172,6 +185,7 @@ pub fn run() {
             providers::custom_graph::configure_graph,
             providers::custom_graph::get_graph,
             writer::commands::generate_script,
+            writer::commands::start_script_run,
             writer::commands::optimize_prompt,
             writer::commands::prompt_agent_step,
             writer::commands::finish_prompt_run,
@@ -179,6 +193,8 @@ pub fn run() {
             writer::commands::prompt_shot_context,
             writer::commands::save_prompt_memory,
             writer::commands::save_writer,
+            writer::commands::select_writer,
+            writer::commands::remove_writer,
             writer::templates::commands::prompt_templates,
             writer::templates::commands::find_prompt_templates,
             writer::templates::commands::parse_prompt_templates,
@@ -186,6 +202,17 @@ pub fn run() {
             writer::templates::commands::export_prompt_templates,
             writer::commands::update_prompt_session,
         ])
-        .run(tauri::generate_context!())
-        .expect("莫比环启动失败");
+        .build(context)
+        .unwrap_or_else(|e| {
+            crate::diagnostics::failure("startup", &e.to_string());
+            panic!("莫比环启动失败：{e}");
+        });
+    app.run(|_handle, event| match event {
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => {
+            let _ = crate::desktop_window::restore(_handle);
+        }
+        tauri::RunEvent::Exit => crate::diagnostics::entry("INFO", "exit", "应用已退出"),
+        _ => {}
+    });
 }

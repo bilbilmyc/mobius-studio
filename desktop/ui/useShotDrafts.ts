@@ -51,7 +51,11 @@ export function useShotDrafts(report: (s: string) => void) {
       setReady(true)
     }).catch(e => report('读取分镜草稿失败。' + String(e)))
     const unsubscribe = getCurrentWindow().onCloseRequested(async event => {
-      try { await flush() } catch { event.preventDefault() }
+      // The native window handles closing to the tray. Only an explicit quit can exit.
+      event.preventDefault()
+      let saved = false
+      try { await flush(); saved = true } catch { /* flush already reports the error */ }
+      try { await window.studio.finishWindowClose(saved) } catch (e) { report(String(e)) }
     })
     return () => { alive = false; void unsubscribe.then(off => off()) }
   }, [report])

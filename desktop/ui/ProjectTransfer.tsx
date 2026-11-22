@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import { Modal } from './Editor'
 interface Report {
   title: string
@@ -38,6 +38,8 @@ export function ProjectTransfer({
   return (
     <>
       <button
+        type="button"
+        className="link"
         onClick={() => {
           setOpen(true)
           setReport(undefined)

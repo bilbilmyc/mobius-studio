@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { statusLabels, type JobView } from '../shared'
-import { invoke } from '@tauri-apps/api/core'
+import { statusLabels, type JobView, type MediaKind } from '../shared'
+import { invoke } from './ipc'
 import { ReceiptRecovery } from './ReceiptRecovery'
 import { canResume, interruptedDownload, taskGuidance, useVisibleTime } from './taskHelp'
 
@@ -17,7 +17,7 @@ function duration(seconds: number) {
   )
 }
 
-function WaitTime({ created, retryAt, now }: Pick<JobView, 'created' | 'retryAt'> & { now: number }) {
+export function WaitTime({ created, retryAt, now }: Pick<JobView, 'created' | 'retryAt'> & { now: number }) {
   const elapsed = created > 0 ? duration(Math.max(0, Math.floor((now - created) / 1000))) : ''
   const retry = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0
   return (
@@ -42,13 +42,24 @@ function WaitTime({ created, retryAt, now }: Pick<JobView, 'created' | 'retryAt'
   )
 }
 
-export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
+export function SubmittingPreview({ kind, background }: { kind: MediaKind; background: () => void }) {
+  return <div className="job-preview" data-active="true" data-state="preparing">
+    <div className="preview-flow" aria-hidden="true" />
+    <div className="preview-state-content">
+      <div role="status"><h2>正在提交{kind === 'image' ? '图片' : '视频'}任务</h2><p>正在准备本次生成的参数和素材。</p></div>
+      <button type="button" onClick={background}>转入后台</button>
+    </div>
+  </div>
+}
+
+export function JobPreviewState({ job, retry, configure, reuse, promptOnly, background }: {
   job: JobView; retry?: () => void; configure: () => void; reuse: () => Promise<void>; promptOnly: boolean
+  background: () => void
 }) {
   const [busy, setBusy] = useState(false), [feedback, setFeedback] = useState('')
   const media = job.kind === 'image' ? '图片' : '视频'
   const state = retry ? 'unreadable' : job.status
-  const phase = ['preparing', 'submitting'].includes(state)
+  const phase = ['queued', 'preparing', 'submitting'].includes(state)
     ? 0
     : state === 'waiting'
       ? 1
@@ -65,6 +76,7 @@ export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
     finally { setBusy(false) }
   }
   const titles: Record<string, string> = {
+    queued: '正在排队',
     preparing: '正在准备素材',
     submitting: '正在提交' + media + '任务',
     waiting: '正在生成' + media,
@@ -138,6 +150,7 @@ export function JobPreviewState({ job, retry, configure, reuse, promptOnly }: {
         {phase >= 0 && (job.created > 0 || !!job.retryAt) && (
           <WaitTime created={job.created} retryAt={job.retryAt} now={now} />
         )}
+        {phase >= 0 && <button type="button" onClick={background}>转入后台</button>}
         {job.protocol==='comfy-image'&&job.remoteId&&['waiting','paused'].includes(state)&&<button disabled={busy} onClick={()=>void perform(()=>invoke<string>('cancel_remote',{id:job.id}))}>取消此远端任务</button>}
         {job.status==='uncertain'&&<details><summary>记录人工核对结果</summary>{['服务商确认未受理','已在官网人工取回'].map(outcome=><button key={outcome} disabled={busy} onClick={()=>void perform(()=>invoke('mark_reconciled',{id:job.id,outcome}))}>{outcome}</button>)}</details>}
         {guide && <div className="task-guidance" role="group" aria-label="处理建议">

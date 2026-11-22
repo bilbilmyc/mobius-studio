@@ -1,6 +1,7 @@
 import { useReducer, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  writerName,
   type Composer, type Integrations, type MediaKind, type OptimizationMode, type Picked,
   type PromptOptimization, type PromptReferences, type PromptSuggestion, type ShotLink,
 } from '../shared'
@@ -140,7 +141,7 @@ export function PromptOptimizer({ composer, writer, activity, start, change, con
     {(open || generation) && createPortal(<Modal title={generation ? '生成前优化' : '优化提示词'} wide close={close} initialFocus={originalField}>
       <div className="dialog-body optimizer-body">
         <div className="optimizer-context"><span>{[shot?.label, kind === 'image' ? '图片' : '视频'].filter(Boolean).join(' · ')}</span>
-          {writer?.model && <small>{writer.model}</small>}
+          {writer?.model && <small>{writerName(writer)} · {writer.model}</small>}
           {!generation && <PromptTemplates kind={kind} seed={suggestion?.text || composer.prompt} applyLabel="放入优化稿" apply={(text,name) =>
             change(old => ({ ...old, suggestion: { original:old.prompt, text, model:'', source:'template', templateName:name, mode, references } }))}/>}
           {!generation && <PromptChat writer={writer} context={{ scope: { kind, shot }, original: composer.prompt,

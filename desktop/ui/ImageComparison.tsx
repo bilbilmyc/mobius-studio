@@ -82,8 +82,9 @@ export function peerInput(input: Start, option: Option): Start {
     template: option.template?.Key ?? input.template, seconds: 0 }
 }
 
-export function ComparisonDialog({ group, jobs, close, selected, inspect }: {
+export function ComparisonDialog({ group, jobs, close, selected, inspect, background }: {
   group: Comparison; jobs: JobView[]; close: () => void; selected: () => void; inspect: (job: JobView) => void
+  background: () => void
 }) {
   const pair = group.jobIds.map(id => jobs.find(j => j.id === id))
   const now = useVisibleTime(pair.some(j => j && ['preparing', 'submitting', 'waiting', 'downloading'].includes(j.status)), 15000)
@@ -122,5 +123,7 @@ export function ComparisonDialog({ group, jobs, close, selected, inspect }: {
       </div>
       {error && <p role="alert" className="form-error">{error}</p>}
     </div>
+    {pair.some(job => !job || ['queued', 'preparing', 'submitting', 'waiting', 'downloading'].includes(job.status)) &&
+      <footer className="modal-actions"><button onClick={background}>转入后台</button></footer>}
   </Modal>
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 type Tools = { ffmpeg: string | null; ffprobe: string | null }
 export function MediaToolSettings() {
   const [tools, setTools] = useState<Tools>(),

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import { listen } from '@tauri-apps/api/event'
 import type { Bridge } from '../shared'
 import { sizedExport } from './gpuExport'
@@ -30,12 +30,19 @@ const api: Bridge = {
   savePerformance: (mode) => invoke('save_performance', { mode }),
   setFinal: (scriptId, sceneId, kind, jobId) => invoke('set_final', { scriptId, sceneId, kind, jobId }),
   settings: () => invoke('integration_settings'),
+  runtimeInfo: () => invoke('runtime_info'),
+  openLogFolder: () => invoke('open_log_folder'),
+  requestQuit: () => invoke('request_quit'),
+  finishWindowClose: saved => invoke('finish_window_close', { saved }),
   saveWriter: (input) => invoke('save_writer', { input }),
+  selectWriter: (id, model) => invoke('select_writer', { id, model }),
+  removeWriter: id => invoke('remove_writer', { id }),
   saveStorage: (target, secret) => invoke('save_storage', { target, secret }),
   uploadImage: (id) => invoke('upload_image', { id }),
   copyImage: (id, link) => invoke('copy_job_image', { id, link }),
   scripts: () => invoke('list_scripts'),
   generateScript: (brief, count) => invoke('generate_script', { brief, count }),
+  startScriptRun: (brief, count, target) => invoke('start_script_run', { brief, count, target }),
   editScript: (id, story) => invoke('edit_script', { id, story }),
   exportFile: async (id, resize, chooseLocation) => resize
     ? (await api.exportSized(id, resize, chooseLocation)).path

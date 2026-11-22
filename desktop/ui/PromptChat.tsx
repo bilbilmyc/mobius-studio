@@ -61,7 +61,7 @@ function ChatDialog({ context, writer, useDraft, close }: Props & { close: () =>
   function send() {
     if (!session || !writer?.hasKey || !input.trim() || memory !== session.memory) return
     void perform('正在改稿…', async signal => {
-      const saved = await runPromptTurn(window.studio, { model: writer.model, base: writer.base }, session, context, input, signal, setStatus)
+      const saved = await runPromptTurn(window.studio, { id: writer.id, model: writer.model, base: writer.base }, session, context, input, signal, setStatus)
       if (!signal.aborted) { setSession(saved); setMemory(saved.memory); setInput(''); field.current?.focus() }
     })
   }

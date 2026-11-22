@@ -207,11 +207,22 @@ impl Relay {
         Ok(())
     }
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceGroup {
+    #[default]
+    Auto,
+    Direct,
+    Relay,
+    SelfHosted,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct Profile {
     pub id: String,
     pub name: String,
+    pub service_group: ServiceGroup,
     pub protocol_id: String,
     pub base_url: String,
     pub model: String,
@@ -228,6 +239,7 @@ pub struct Profile {
 pub struct Edit {
     pub id: Option<String>,
     pub name: String,
+    pub service_group: Option<ServiceGroup>,
     pub protocol: String,
     pub base: String,
     pub model: String,

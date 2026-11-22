@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from './ipc'
 import type { JobView } from '../shared'
 
 export async function videoPoster(job: JobView, signal: AbortSignal) {

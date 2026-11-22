@@ -30,6 +30,12 @@ import { templateFixture, exerciseTemplates, exerciseCommunityFile } from './pro
 import { agentFixture, exerciseAgent, exerciseLiveAgent, prepareLiveWriter } from './prompt-agent.mjs'
 import { exerciseLiveMedia } from './media-live.mjs'
 import { waitForValue } from './wait-for-value.mjs'
+import { exerciseConnectionGroups, legacyRelay } from './connection-groups.mjs'
+import { exerciseWriterConnections, writerRelayFixture } from './writer-connections.mjs'
+import { exerciseMaximizedScript, exerciseResponsiveLayout } from './responsive-layout.mjs'
+import { exerciseScriptWriting } from './script-writing.mjs'
+import { exerciseScriptProgress, scriptProgressFixture } from './script-progress.mjs'
+import { exerciseLifecycle, lifecycleFixture } from './window-lifecycle.mjs'
 import { exampleFixture, exerciseExamples } from './request-examples.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
@@ -94,13 +100,10 @@ async function stop() {
   await browser?.close().catch(() => {})
   browser = undefined
 }
-async function restartNormally() {
+async function restartNormally(quit = () => page.evaluate(() => { void window.studio.requestQuit() })) {
   const exiting = once(child, 'exit')
-  const requested = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    'if (-not ([Diagnostics.Process]::GetProcessById([int]$env:MOBIUS_TEST_PID)).CloseMainWindow()) { exit 1 }'],
-    { env: { ...process.env, MOBIUS_TEST_PID: String(child.pid) }, windowsHide: true })
-  assert.equal(requested.status, 0, 'Could not send a normal window close')
-  await Promise.race([exiting, delay(15000, null, { ref: false }).then(() => { throw Error('Window did not close after flushing drafts') })])
+  const requested = Promise.race([quit(), exiting]).then(() => exiting)
+  await Promise.race([requested, delay(15000, null, { ref: false }).then(() => { throw Error('Application did not exit after flushing drafts') })])
   await stop()
   await start()
   return page
@@ -209,6 +212,52 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  if (process.argv.includes('--script-progress-only')) {
+    const fixture = scriptProgressFixture()
+    relay = await listen(fixture.handle)
+    await start()
+    await exerciseScriptProgress({page, base:origin(relay) + '/v1', fixture, shot, restart:restartNormally})
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--script-writing-only')) {
+    await start()
+    await exerciseScriptWriting({ page, shot })
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--lifecycle-only')) {
+    const fixture = lifecycleFixture(png)
+    relay = await listen(fixture.handle)
+    await start()
+    try { await exerciseLifecycle({ page, data, base: origin(relay)+'/v1', currentPid: () => child.pid, fixture, restart: restartNormally, shot }) }
+    finally { fixture.release.resolve() }
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--responsive-only')) {
+    await seedGallery(data)
+    await start()
+    await exerciseResponsiveLayout({ page, shot })
+    await exerciseMaximizedScript({ page: await restartNormally(), shot })
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--writer-connections-only')) {
+    const fixture = writerRelayFixture()
+    relay = await listen(fixture.handle)
+    await start()
+    await exerciseWriterConnections({ page, base: origin(relay) + '/v1', restart: restartNormally, shot, fixture })
+    assert.deepEqual(errors, [])
+    return
+  }
+  if (process.argv.includes('--connection-groups-only')) {
+    await writeFile(path.join(data, 'connections.json'), JSON.stringify([legacyRelay]))
+    await start()
+    await exerciseConnectionGroups({ page, restart: restartNormally, shot })
+    assert.deepEqual(errors, [])
+    return
+  }
   if (process.argv.includes('--media-live')) {
     keepPaidTestHome=true
     await start()
@@ -461,6 +510,11 @@ async function run() {
   const checkHelp = () => exerciseTaskHelp({ page, base, fixture: help, record, state, done, shot, restart: restartNormally, video })
   const checkDelivery = () => exerciseDelivery({ data, restart: restartNormally, shot, record, base, calls: deliveryCalls, templates, done })
   const checkRoadmap=()=>exerciseRoadmap({page,data,temp,png,video,templates,restart:restartNormally})
+  if (process.argv.includes('--background-only')) {
+    await exerciseBackgroundTasks({page, base, fixture:background, record, state, done, shot, restart:restartNormally, png, video})
+    assert.deepEqual(errors, [])
+    return
+  }
   if(process.argv.includes('--comfy-only')) {await exerciseComfy({page,base,done,shot,fixture:comfy});return}
   if(process.argv.includes('--roadmap-only')) {await checkRoadmap();return}
   if (process.argv.includes('--delivery-only')) {
@@ -590,6 +644,7 @@ async function run() {
   await page.getByRole('button', { name: '添加模型服务' }).click()
   let dialog = page.getByRole('dialog')
   await dialog.getByLabel('连接名称').fill('测试图片')
+  await dialog.getByLabel('服务分组').selectOption('relay')
   await dialog.getByLabel('服务根地址').fill(new URL(base).origin)
   await dialog.getByLabel('API Key').fill('demo-image')
   await dialog.getByRole('button', { name: '获取模型列表' }).click()
@@ -597,6 +652,9 @@ async function run() {
   await dialog.getByText('同一连接的其他模型', { exact: true }).click()
   await dialog.getByLabel('从列表加入备选模型').selectOption('local-image-fast')
   await dialog.getByRole('button', { name: '保存连接' }).click()
+  const savedConnection = page.getByRole('region', { name: '中转站与自定义接口' }).getByRole('article', { name: '测试图片' })
+  await savedConnection.waitFor()
+  assert.deepEqual(await savedConnection.getByRole('list', { name: '图片模型' }).locator('code').allTextContents(), ['local-image', 'local-image-fast'])
   await page.getByRole('button', { name: '创作台', exact: true }).click()
   await page.waitForFunction(
     () => document.querySelector('[aria-label="生成服务"]').value !== '@site',
@@ -727,7 +785,6 @@ async function run() {
       await page.emulateMedia({ reducedMotion: 'no-preference' })
       await page.getByRole('button', { name: '生成' + media, exact: true }).click()
       try {
-        await page.getByRole('group', { name: '最近提交的任务' }).getByRole('button', { name: '查看进度' }).click()
         await page.getByRole('heading', { name: '正在生成' + media }).waitFor()
         assert.equal(await page.locator('.preview-stages [aria-current=step]').innerText(), '模型生成')
         await checkBackdrop(true)
@@ -889,6 +946,7 @@ async function run() {
     restart: async () => { await stop(); await start(); return page } })
   console.log('Screenplay editing, scene handoff, manual and automatic signed uploads, retry and restart passed')
   console.log('Packaged IPC, 12 RH submissions, third-party protocols, scoped credentials and native video playback passed')
+  await exerciseScriptWriting({ page, shot })
   await checkShots()
   await checkOptimizer()
   await checkGeneration()

@@ -43,7 +43,7 @@ impl Store {
         Ok(p)
     }
     pub fn profile_view(&self, p: &Profile) -> Value {
-        json!({"Id":p.id,"Name":p.name,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
+        json!({"Id":p.id,"Name":p.name,"ServiceGroup":p.service_group,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
     }
     pub fn edit(&self, e: Edit) -> Result<String> {
         let _lock = self.gate.lock().unwrap();
@@ -85,6 +85,8 @@ impl Store {
         });
         if official {
             p.extra.insert("DefaultOfficial".into(), Value::Bool(true));
+        } else if let Some(group) = e.service_group {
+            p.service_group = group;
         }
         p.name = if official {
             "AIGC 创作空间 · 官网".into()

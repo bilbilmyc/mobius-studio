@@ -22,8 +22,25 @@ pub(crate) struct Message {
 
 #[derive(Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct WriterTarget {
+    pub id: Option<String>,
     pub base: String,
     pub model: String,
+}
+
+pub(super) struct WriterRequest {
+    pub model: String,
+    pub service: String,
+    request: reqwest::RequestBuilder,
+    key: String,
+}
+
+impl WriterRequest {
+    pub async fn send(self) -> Result<(String, Value)> {
+        let reply = json_response(self.request, &self.key)
+            .await
+            .map_err(|e| e.message)?;
+        Ok((self.model, reply))
+    }
 }
 
 impl Studio {
@@ -65,14 +82,35 @@ impl Studio {
 
     pub(super) async fn writer_request(
         &self,
-        mut body: Value,
+        body: Value,
         target: Option<&WriterTarget>,
     ) -> Result<(String, Value)> {
-        let writer = self.store.preferences()?.writer;
-        if target.is_some_and(|t| t.base != writer.base_url || t.model != writer.model) {
-            return Err("文本模型连接已更换，请用当前连接重新发送。".into());
+        let mut prepared = self.prepare_writer_request(body, target)?;
+        if target.is_some() {
+            prepared.request = prepared.request.timeout(std::time::Duration::from_secs(90));
         }
-        let key = self.store.vault.get(&writer, &writer.base_url)?;
+        prepared.send().await
+    }
+
+    pub(super) fn prepare_writer_request(
+        &self,
+        mut body: Value,
+        target: Option<&WriterTarget>,
+    ) -> Result<WriterRequest> {
+        let (writer, key) = {
+            let _guard = self.store.gate.lock().unwrap();
+            let connection = self.store.preferences()?.writer;
+            let writer = connection.profile;
+            if target.is_some_and(|t| {
+                t.id.as_ref().is_some_and(|id| id != &connection.id)
+                    || t.base != writer.base_url
+                    || t.model != writer.model
+            }) {
+                return Err("文本模型连接已更换，请用当前连接重新发送。".into());
+            }
+            let key = self.store.vault.get(&writer, &writer.base_url)?;
+            (writer, key)
+        };
         if key.is_empty() {
             return Err("请在设置的「剧本模型」中填写 API Key。".into());
         }
@@ -83,13 +121,20 @@ impl Studio {
             .post(route(&writer.base_url, "chat/completions")?)
             .bearer_auth(&key)
             .json(&body);
-        let request = if target.is_some() {
-            request.timeout(std::time::Duration::from_secs(90))
+        let service = if writer.name.is_empty() {
+            reqwest::Url::parse(&writer.base_url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_default()
         } else {
-            request
+            writer.name
         };
-        let reply = json_response(request, &key).await.map_err(|e| e.message)?;
-        Ok((writer.model, reply))
+        Ok(WriterRequest {
+            model: writer.model,
+            service,
+            request,
+            key,
+        })
     }
 }
 

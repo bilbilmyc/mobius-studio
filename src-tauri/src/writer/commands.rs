@@ -26,6 +26,28 @@ pub(crate) async fn save_writer(s: Core<'_>, input: WriterInput) -> Result<()> {
 }
 
 #[tauri::command]
+pub(crate) async fn select_writer(s: Core<'_>, id: String, model: String) -> Result<()> {
+    local_data(s, move |store| store.select_writer(&id, &model)).await
+}
+
+#[tauri::command]
+pub(crate) async fn remove_writer(s: Core<'_>, id: String) -> Result<()> {
+    local_data(s, move |store| store.remove_writer(&id)).await
+}
+
+#[tauri::command]
+pub(crate) async fn start_script_run(
+    s: Core<'_>,
+    brief: String,
+    count: usize,
+    target: WriterTarget,
+) -> Result<super::script_runs::ScriptRun> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.start_script_run(brief, count, &target))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub(crate) async fn generate_script(
     s: Core<'_>,
     brief: String,

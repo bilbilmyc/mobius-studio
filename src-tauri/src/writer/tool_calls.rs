@@ -279,6 +279,7 @@ mod tests {
             observations: vec![],
         };
         let target = WriterTarget {
+            id: None,
             base: "https://writer.invalid".into(),
             model: "text".into(),
         };

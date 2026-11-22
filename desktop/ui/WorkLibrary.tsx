@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 import { type LibraryMark, unmarked } from './LibraryMarks'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {

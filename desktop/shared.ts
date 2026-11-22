@@ -268,9 +268,31 @@ export interface SiteOptions {
   Priority: number
   Assets: Asset[]
 }
+export const serviceGroupNames = {
+  direct: '厂商直连',
+  relay: '中转站与自定义接口',
+  'self-hosted': '本地与自托管',
+} as const
+export type ServiceGroup = keyof typeof serviceGroupNames
+export const serviceGroupIds = Object.keys(serviceGroupNames) as ServiceGroup[]
+
+export function suggestedServiceGroup(protocol: Protocol | 'chat-completions', base: string): ServiceGroup {
+  if (protocol === 'comfy-image') return 'self-hosted'
+  let host: string
+  try { host = new URL(base).hostname.replace(/\.$/, '') } catch {
+    return protocol.startsWith('wan-') || protocol === 'ark-video' ? 'direct' : 'relay'
+  }
+  if (host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host)) return 'self-hosted'
+  if (host === 'api.openai.com' || (protocol === 'chat-completions' && host === 'api.deepseek.com') || host.endsWith('.openai.azure.com') ||
+    /^dashscope(?:-[a-z0-9-]+)?\.aliyuncs\.com$/.test(host) || host.endsWith('.maas.aliyuncs.com') ||
+    /^ark\.[a-z0-9-]+\.volces\.com$/.test(host)) return 'direct'
+  return 'relay'
+}
+
 export interface Profile {
   Id: string
   Name: string
+  ServiceGroup?: ServiceGroup | 'auto'
   ProtocolId: Protocol
   BaseUrl: string
   Model: string
@@ -284,7 +306,16 @@ export type ProfileView = Omit<Profile, 'Keys' | 'Secrets'> & {
   hasKey: boolean
 }
 export const profileModels = (p: ProfileView) => [p.Model, ...(p.Models ?? [])]
+function groupServices<T>(profiles: T[], groupFor: (profile: T) => ServiceGroup) {
+  const groups: Record<ServiceGroup, T[]> = { direct: [], relay: [], 'self-hosted': [] }
+  for (const profile of profiles) groups[groupFor(profile)].push(profile)
+  return serviceGroupIds.filter(id => groups[id].length).map(id => ({ id, name: serviceGroupNames[id], profiles: groups[id] }))
+}
+export function groupProfiles(profiles: ProfileView[]) {
+  return groupServices(profiles, p => !p.ServiceGroup || p.ServiceGroup === 'auto' ? suggestedServiceGroup(p.ProtocolId, p.BaseUrl) : p.ServiceGroup)
+}
 export interface EditProfile {
+  serviceGroup?: ServiceGroup | 'auto'
   models?: string[]
   sessionOnly?: boolean
   controls?: Controls
@@ -373,6 +404,7 @@ export interface Start {
   assets: Picked[]
 }
 export interface State {
+  scriptRuns: ScriptRun[]
   modelFeatures?:Record<string,{sizes:string[];maxImages?:number|null;firstLast?:boolean|null;mask?:boolean|null;multi?:number|null}>
   comparisons: Comparison[]
   profiles: ProfileView[]
@@ -396,10 +428,31 @@ export interface StorageTarget {
   virtualHost: boolean
   automatic: boolean
 }
+export interface WriterService {
+  id: string
+  name: string
+  base: string
+  model: string
+  models: string[]
+  serviceGroup: ServiceGroup | 'auto'
+  hasKey: boolean
+}
+export function writerName(writer: Pick<WriterService, 'name' | 'base'>) {
+  if (writer.name) return writer.name
+  try {
+    const url = new URL(writer.base)
+    return url.hostname === 'api.deepseek.com' ? 'DeepSeek' : url.host
+  } catch { return writer.base || '剧本服务' }
+}
+export function groupWriters(writers: WriterService[]) {
+  const ordered = [...writers].sort((a, b) => writerName(a).localeCompare(writerName(b), 'zh-CN') || a.id.localeCompare(b.id))
+  return groupServices(ordered, w => w.serviceGroup === 'auto' ? suggestedServiceGroup('chat-completions', w.base) : w.serviceGroup)
+}
 export interface Integrations {
   developerMode: boolean
   performance: PerformanceMode
-  writer: { base: string; model: string; hasKey: boolean }
+  writer: WriterService
+  writers: WriterService[]
   storage: StorageTarget
   hasStorageKey: boolean
 }
@@ -414,6 +467,17 @@ export interface Scene {
 export interface Screenplay {
   title: string
   scenes: Scene[]
+}
+export interface ScriptRun {
+  id: string
+  created: number
+  brief: string
+  count: number
+  model: string
+  service: string
+  status: 'writing' | 'done' | 'failed' | 'interrupted'
+  title: string
+  error: string
 }
 export interface Script extends Screenplay {
   finals: Record<string, Partial<Record<MediaKind, string>>>
@@ -530,12 +594,19 @@ export interface Bridge extends PromptAgentBridge {
   savePerformance(mode: PerformanceMode): Promise<void>
   setFinal(scriptId: string, sceneId: string, kind: MediaKind, jobId: string | null): Promise<Script>
   settings(): Promise<Integrations>
-  saveWriter(input: { base: string; model: string; key: string }): Promise<void>
+  runtimeInfo(): Promise<{ tray: boolean; logFile: string }>
+  openLogFolder(): Promise<void>
+  requestQuit(): Promise<void>
+  finishWindowClose(saved: boolean): Promise<void>
+  saveWriter(input: { base: string; model: string; key: string; id?: string; name?: string; models?: string[]; serviceGroup?: WriterService['serviceGroup']; activate?: boolean }): Promise<void>
+  selectWriter(id: string, model: string): Promise<void>
+  removeWriter(id: string): Promise<void>
   saveStorage(target: StorageTarget, secret: string): Promise<void>
   uploadImage(id: string): Promise<void>
   copyImage(id: string, link: boolean): Promise<void>
   scripts(): Promise<Script[]>
   generateScript(brief: string, count: number): Promise<Script>
+  startScriptRun(brief: string, count: number, target: Pick<WriterService, 'id' | 'base' | 'model'>): Promise<ScriptRun>
   editScript(id: string, story: Screenplay): Promise<Script>
   exportFile(
     id: string,

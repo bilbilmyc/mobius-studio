@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './ipc'
 export interface LibraryMark {
   favorite: boolean
   archived: boolean

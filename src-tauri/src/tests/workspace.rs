@@ -18,6 +18,86 @@ use std::sync::{
 };
 
 #[test]
+fn legacy_writer_keeps_credentials_and_multiple_accounts_stay_independent() {
+    use crate::domain::Profile;
+    use crate::storage::files::save;
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::new(temp.path().into()).unwrap();
+    let base = "https://relay.example/v1";
+    let mut legacy = Profile {
+        id: id(),
+        base_url: base.into(),
+        model: "shared".into(),
+        ..Default::default()
+    };
+    store.vault.put(&mut legacy, "old-writer-key").unwrap();
+    save(
+        &store.home.join("settings.json"),
+        &json!({"writer":{
+            "Id":legacy.id,"BaseUrl":base,"Model":"shared","Keys":legacy.keys
+        }}),
+    )
+    .unwrap();
+    let initial = store.preferences().unwrap().writer;
+    assert_eq!(initial.profile.id, legacy.id);
+    assert_eq!(
+        store.vault.get(&initial.profile, base).unwrap(),
+        "old-writer-key"
+    );
+    assert_eq!(
+        store.settings_view().unwrap()["writers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let edit = |id: &str, key: &str| WriterInput {
+        id: Some(id.into()),
+        base: base.into(),
+        model: "shared".into(),
+        key: key.into(),
+        models: Some(vec!["second".into(), "shared".into()]),
+        ..Default::default()
+    };
+    store.save_writer(edit("@new", "other-writer-key")).unwrap();
+    let stored = store.preferences().unwrap();
+    let other = stored.other_writers[0].id.clone();
+    assert_eq!(stored.writer.id, initial.id);
+    assert!(store.select_writer(&other, "missing").is_err());
+    assert_eq!(store.preferences().unwrap().writer.id, initial.id);
+    store.select_writer(&other, "second").unwrap();
+    let selected = store.preferences().unwrap().writer;
+    assert_eq!(selected.profile.model, "second");
+    assert_eq!(
+        store.vault.get(&selected.profile, base).unwrap(),
+        "other-writer-key"
+    );
+    store
+        .save_writer(edit(&other, "rotated-writer-key"))
+        .unwrap();
+    assert_eq!(store.preferences().unwrap().writer.id, other);
+    let moved = WriterInput {
+        base: "https://another.example/v1".into(),
+        ..edit(&other, "")
+    };
+    store.save_writer(moved).unwrap();
+    assert_eq!(store.settings_view().unwrap()["writer"]["hasKey"], false);
+    assert!(store.save_writer(edit("removed-id", "ignored")).is_err());
+    store.remove_writer(&other).unwrap();
+    let current = store.preferences().unwrap().writer;
+    assert_eq!(current.id, initial.id);
+    assert_eq!(
+        store.vault.get(&current.profile, base).unwrap(),
+        "old-writer-key"
+    );
+    store.remove_writer(&initial.id).unwrap();
+    let reset = store.settings_view().unwrap();
+    assert_eq!(reset["writer"]["hasKey"], false);
+    assert_eq!(reset["writer"]["base"], "https://api.deepseek.com");
+    assert_ne!(reset["writer"]["id"], initial.id);
+}
+
+#[test]
 fn thumbnail_reuses_cache_and_detects_replaced_originals() {
     use image::{ImageBuffer, Luma, Rgb, RgbImage};
     let temp = tempfile::tempdir().unwrap();
@@ -182,13 +262,14 @@ async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
             base: origin.clone(),
             model: "a".into(),
             key: "writer-key".into(),
+            ..Default::default()
         })
         .unwrap();
     let media = studio.store.edit(serde_json::from_value(json!({
         "name":"media", "protocol":"openai-image", "base":tenant, "model":"media","key":"media-key","sessionOnly":true
     })).unwrap()).unwrap();
     let writer = |base: &str, key: &str| Lookup {
-        source: Source::Writer,
+        source: Source::Writer { id: None },
         base: base.into(),
         key: key.into(),
     };
@@ -264,6 +345,7 @@ async fn model_directory_uses_the_configured_prefix_and_scoped_credentials() {
             base: tenant,
             model: "a".into(),
             key: String::new(),
+            ..Default::default()
         })
         .unwrap();
     server.abort();
@@ -330,6 +412,7 @@ async fn screenplay_json_is_editable_and_scoped_to_the_writer() {
         base: base.into(),
         model: "deepseek-v4-pro".into(),
         key: key.into(),
+        ..Default::default()
     };
     studio
         .store
@@ -345,6 +428,20 @@ async fn screenplay_json_is_editable_and_scoped_to_the_writer() {
         .is_err());
     assert_eq!(studio.store.scripts().unwrap().len(), 1);
     assert_eq!(studio.store.scripts().unwrap()[0].story.title, "晨渡");
+    // A crash after saving the script but before updating its task must recover the same work.
+    let receipt = temp.path().join("剧本任务").join(format!("{}.json", script.id));
+    let text = std::fs::read_to_string(&receipt).unwrap();
+    assert!(!text.contains("writer-fixture"));
+    let mut pending: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(pending["status"], "done");
+    pending["status"] = json!("writing");
+    pending["title"] = json!("");
+    crate::storage::files::save(&receipt, &pending).unwrap();
+    let reopened = crate::writer::script_runs::ScriptRuns::load(&studio.store).unwrap().list();
+    let recovered = reopened.iter().find(|r| r.id == script.id).unwrap();
+    assert!(matches!(recovered.status, crate::writer::script_runs::RunStatus::Done));
+    assert_eq!(recovered.title, "晨渡");
+    assert_eq!(reopened.len(), 2);
     assert!(!std::fs::read_to_string(temp.path().join("settings.json"))
         .unwrap()
         .contains("writer-fixture"));

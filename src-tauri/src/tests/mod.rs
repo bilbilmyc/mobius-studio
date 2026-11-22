@@ -12,6 +12,7 @@ fn profile(base: &str, protocol: &str) -> Edit {
     Edit {
         id: None,
         name: "本机测试".into(),
+        service_group: None,
         protocol: protocol.into(),
         base: base.into(),
         model: "test-model".into(),

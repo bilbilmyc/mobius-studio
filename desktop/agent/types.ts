@@ -3,7 +3,7 @@ import type { MediaKind, PromptResult, ShotLink } from '../shared'
 
 export type PromptScope = { kind: MediaKind; shot?: ShotLink }
 export type PromptSource = 'read_shot' | 'read_references' | 'find_templates' | 'recall_drafts'
-export type WriterTarget = { base: string; model: string }
+export type WriterTarget = { id?: string; base: string; model: string }
 export type Message = { role: 'system' | 'user' | 'assistant'; content: string }
 export interface PromptTurn {
   user: string

@@ -6,7 +6,7 @@
         "section": "graphics",
         "desktopTemplate": "linux/mobius-studio.desktop",
         "depends": ["libxdo3"],
-        "recommends": ["libsecret-tools", "gstreamer1.0-plugins-good", "gstreamer1.0-plugins-bad", "gstreamer1.0-libav"]
+        "recommends": ["libayatana-appindicator3-1 | libappindicator3-1", "libsecret-tools", "gstreamer1.0-plugins-good", "gstreamer1.0-plugins-bad", "gstreamer1.0-libav"]
       }
     }
   }

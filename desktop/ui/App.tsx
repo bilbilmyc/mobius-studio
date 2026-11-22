@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { reportScriptError } from './ipc'
 import './bridge'
 import './studio.css'
 import './workspace.css'
@@ -12,6 +13,8 @@ import {
   officialModes,
   relaySlots,
   defaultTemplate,
+  groupProfiles,
+  jobStatusGroup,
   isSite,
   mediaKind,
   profileModels,
@@ -23,6 +26,7 @@ import {
   statusLabels,
   templates,
   type JobView,
+  type ScriptRun,
   type ShotLink,
   type Integrations,
   type Kind,
@@ -38,7 +42,7 @@ import {
   type OptimizationMode,
   type PromptOptimization,
 } from '../shared'
-import { Modal, Prompt } from './Editor'
+import { ExpandableText, Modal } from './Editor'
 import { ImageExport } from './ImageExport'
 import { OutputSpecs, type MediaMetadata } from './MediaDelivery'
 import { requestedAudio } from './outputSpecs'
@@ -55,7 +59,7 @@ import { Settings, type SettingsSection } from './Settings'
 import { RequestHistory } from './RequestHistory'
 import { ScriptDesk } from './ScriptDesk'
 import { CloudSave } from './CloudSave'
-import { JobPreviewState } from './JobPreviewState'
+import { JobPreviewState, SubmittingPreview } from './JobPreviewState'
 import { BackgroundTasks, jobAction } from './BackgroundTasks'
 import { WorkLibrary, defaultLibraryView } from './WorkLibrary'
 import { ComfyWorkflow } from './ComfyWorkflow'
@@ -104,6 +108,7 @@ const pageNames = {
   settings: '设置',
 }
 const noJobs: JobView[] = []
+const noScriptRuns: ScriptRun[] = []
 function App() {
   const [notice, say] = useState('就绪'),
     [page, pageTo] = useState<Page>('create')
@@ -123,22 +128,34 @@ function App() {
     setSubmitIssue(undefined)
     workspace.change(kind, shot, edit)
   }
-  const [shown, show] = useState(''),
+  const [previews, setPreviews] = useState<Record<MediaKind, string>>({ image: '', video: '' }),
     [chosen, choose] = useState('')
+  const shown = previews[kind]
+  const previewIntent = useRef({ image: 0, video: 0 })
+  const canvas = useRef<HTMLDivElement>(null)
+  function show(id: string, tab = kind) {
+    previewIntent.current[tab]++
+    setPreviews(previous => previous[tab] === id ? previous : { ...previous, [tab]: id })
+  }
   const [editor, edit] = useState<{
       official: boolean
       profile?: ProfileView
       jobKind?: MediaKind
     } | null>(null),
     [removing, remove] = useState<ProfileView | null>(null),
-    [busy, markBusy] = useState(false)
+    [submission, setSubmission] = useState<{ kind: MediaKind; intent: number; prompt: string } | null>(null)
+  const busy = !!submission
   const [metadata, setMetadata] = useState<MediaMetadata>()
   const [exporting, setExporting] = useState(false)
   const [unreadable, setUnreadable] = useState('')
   const [section, setSection] = useState<SettingsSection>('media')
+  const [editActiveWriter, setEditActiveWriter] = useState(false), [switchingWriter, setSwitchingWriter] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [integrations, setIntegrations] = useState<Integrations>()
   const [openedScripts, setOpenedScripts] = useState(false)
+  const [viewedScriptRun, viewScriptRun] = useState<ScriptRun | null>(null)
+  const scriptRuns = data?.scriptRuns ?? noScriptRuns
+  const currentScriptRun = viewedScriptRun && (scriptRuns.find(r => r.id === viewedScriptRun.id) ?? viewedScriptRun)
   const [libraryView, setLibraryView] = useState(defaultLibraryView)
   const [comparison, compare] = useState<Comparison | null>(null)
   const [scriptRevision, refreshScripts] = useState(0)
@@ -147,7 +164,17 @@ function App() {
     catch (e) { say(msg(e)); throw e }
   }, [])
   useEffect(() => { void loadSettings().catch(() => {}) }, [loadSettings])
+  async function selectWriter(id: string, model: string) {
+    if (switchingWriter) return
+    setSwitchingWriter(true)
+    try {
+      await window.studio.selectWriter(id, model)
+      await loadSettings()
+    } catch (e) { say(msg(e)) }
+    finally { setSwitchingWriter(false) }
+  }
   function settingsPage(next: SettingsSection) {
+    setEditActiveWriter(next === 'writer')
     setSection(next)
     pageTo('settings')
   }
@@ -155,7 +182,7 @@ function App() {
     if (!workspace.ready) { say('正在读取分镜草稿，请稍后再打开。'); return }
     workspace.open(destination, shot, value)
     setKind(destination)
-    show('')
+    show('', destination)
     pageTo('create')
     say('已打开分镜草稿。')
   }
@@ -309,14 +336,23 @@ function App() {
     if ('mode' in cfg) cfg.mode = next
     change(old => ({ ...old, templates: { ...old.templates, [id]: t.Key },
       variants: { ...old.variants, [key]: { ...previous, config: cfg, intent: next } } }))
-    show('')
+    if (!foregroundActive && !pendingPreview) show('')
   }
   const prompt = composer.prompt,
     text = (s: string) => change(old => ({ ...old, prompt: s })),
     hasPrompt = !native || !!currentTemplate.Text
+  const pendingPreview = submission?.kind === kind && submission.intent === previewIntent.current[kind] ? submission : null
   const needsKey = native && !(profile ?? official)?.hasKey,
-    job = shown ? jobs.find((j) => j.id === shown) : undefined,
+    job = !pendingPreview && shown ? jobs.find((j) => j.id === shown) : undefined,
     recent = lastSubmitted ? jobs.find((j) => j.id === lastSubmitted) : undefined
+  const foregroundActive = !!job && jobStatusGroup(job.status) === 'active'
+  function continueCreating() {
+    show('')
+    if (foregroundActive || pendingPreview || comparison) say('任务已转入后台，可继续创作。')
+    const focusComposer = () => (document.getElementById('prompt') ?? document.querySelector<HTMLElement>('.settings select'))?.focus()
+    if (document.querySelector('dialog[open]')) requestAnimationFrame(focusComposer)
+    else focusComposer()
+  }
   const checkProviderKey = profile && !native && !profile.hasKey && proto !== 'comfy-image'
     && profile.Relay?.auth !== 'none' && profile.BaseUrl.startsWith('https://')
   const recentIssue = recent && ['failed', 'uncertain', 'paused'].includes(recent.status) ? taskGuidance(recent, Date.now()) : undefined
@@ -393,7 +429,7 @@ function App() {
     }
   }, [])
   async function generate(choice?: 'original' | 'suggestion') {
-    if (lock.current || !data) return
+    if (lock.current || foregroundActive || !data) return
     if (choice && !review) return
     setSubmitIssue(undefined)
     const fail = (message: string) => {
@@ -443,7 +479,11 @@ function App() {
       return
     }
     lock.current = true
-    markBusy(true)
+    const intentAtSubmit = ++previewIntent.current[kind]
+    setSubmission({ kind, intent: intentAtSubmit, prompt: hasPrompt ? generationPrompt : currentTemplate.Name })
+    requestAnimationFrame(() => {
+      if (previewIntent.current[kind] === intentAtSubmit && canvas.current?.dataset.kind === kind) canvas.current.scrollIntoView({ block: 'nearest' })
+    })
     try {
       const input: Start = {
         shot,
@@ -462,15 +502,22 @@ function App() {
       const next = group ? group.jobIds[0] : await window.studio.start(input)
       if (candidate) change(old => adoptPrompt(old, candidate))
       if (choice) setGenerationReview(null)
-      if (group) compare(group)
       setLastSubmitted(next)
-      say(group ? '两份候选已加入后台。' : '已加入后台，可以继续创作。')
-      void refresh(group ? undefined : [next]).catch(e => say('任务已保存，读取进度时出错。' + msg(e)))
+      if (previewIntent.current[kind] === intentAtSubmit && canvas.current?.dataset.kind === kind) say(group ? '已提交两份图片候选。' : '已提交' + (kind === 'image' ? '图片' : '视频') + '任务。')
+      await refresh(group ? undefined : [next]).catch(e => say('任务已保存，读取进度时出错。' + msg(e)))
+      if (previewIntent.current[kind] === intentAtSubmit) {
+        setUnreadable('')
+        show(next, kind)
+        if (canvas.current?.dataset.kind === kind) {
+          canvas.current.scrollIntoView({ block: 'nearest' })
+          if (group) compare(group)
+        }
+      }
     } catch (e) {
       fail(msg(e))
     } finally {
       lock.current = false
-      markBusy(false)
+      setSubmission(null)
     }
   }
   useEffect(() => {
@@ -491,7 +538,7 @@ function App() {
   })
   function inspect(j: JobView, keepDraft = false) {
     setUnreadable('')
-    show(j.id)
+    show(j.id, keepDraft ? kind : j.kind)
     choose(j.id)
     if (!keepDraft) setKind(j.kind)
     pageTo('create')
@@ -523,7 +570,7 @@ function App() {
         ...old, prompt: j.prompt, service: p?.Id ?? old.service, models: p ? { ...old.models, [p.Id]: p.Model } : old.models,
         suggestion: undefined, appliedOptimization: undefined, promptBeforeOptimization: undefined, compare: '',
       }))
-      show(''); pageTo('create')
+      show('', j.kind); pageTo('create')
       say('原模型配置已变更，已取回提示词。请重新确认生成服务、素材和参数。')
       return
     }
@@ -572,7 +619,7 @@ function App() {
         },
       } },
     }))
-    show('')
+    show('', j.kind)
     pageTo('create')
     say('已恢复提示词、所选参数和素材顺序。')
   }
@@ -647,7 +694,7 @@ function App() {
           ? [{ ...a, role: 'first_frame' }, ...frameOrder(old?.byMode[label] ?? []).filter(v => v.role === 'last_frame')] : [a] },
       } },
     }))
-    show('')
+    show('', destination)
     pageTo('create')
     requestAnimationFrame(() => document.getElementById('prompt')?.focus({ preventScroll: true }))
     say(
@@ -708,7 +755,7 @@ function App() {
         <button
           className={'nav rail-settings' + (page === 'settings' ? ' active' : '')}
           aria-current={page === 'settings' ? 'page' : undefined}
-          onClick={() => pageTo('settings')}
+          onClick={() => { setEditActiveWriter(false); pageTo('settings') }}
         >
           <Icon name="settings" />
           设置
@@ -717,18 +764,20 @@ function App() {
       <main>
         <header className="top">
           <h1>{pageNames[page]}</h1>
+          {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
+            {(['image', 'video'] as const).map(k =>
+              <button key={k} aria-pressed={kind === k} onClick={() => { setKind(k); if (!foregroundActive && !pendingPreview) show('') }}>
+                {k === 'image' ? '图片' : '视频'}</button>)}
+          </div>}
           <div className="top-tools">
             {integrations?.developerMode && <button onClick={() => setHistoryOpen(true)}>请求记录</button>}
             <button className="help-launcher" aria-label="使用帮助" title="使用帮助" onClick={() => setHelpOpen(true)}>?</button>
-            <BackgroundTasks jobs={jobs} inspect={j => inspect(j, true)} />
-            {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
-              {(['image', 'video'] as const).map(k =>
-                <button key={k} aria-pressed={kind === k} onClick={() => { setKind(k); show('') }}>
-                  {k === 'image' ? '图片' : '视频'}</button>)}
-            </div>}
+            <BackgroundTasks jobs={jobs} scriptRuns={scriptRuns} inspect={j => inspect(j, true)}
+              inspectScript={run => { setOpenedScripts(true); viewScriptRun(run); pageTo('script') }} />
           </div>
         </header>
-        {openedScripts && <ScriptDesk active={page === 'script'} writer={integrations?.writer}
+        {openedScripts && <ScriptDesk active={page === 'script'} integrations={integrations} selectWriter={selectWriter} switchingWriter={switchingWriter}
+          runs={scriptRuns} viewedRun={currentScriptRun} viewRun={viewScriptRun}
           configure={() => settingsPage('writer')} usePrompt={shotPrompt} jobs={data?.jobs ?? []} inspect={inspect}
           useFrame={(image, motion, picked, target) => continueWithImage(image, 'video', motion, picked, target)}
           imported={async()=>{await workspace.reload();await refresh()}}
@@ -737,8 +786,8 @@ function App() {
         {page === 'create' ? (
           <div className="work">
             <section className="canvas-col">
-              <div className="canvas">
-                {job ? (
+              <div className="canvas" ref={canvas} data-kind={kind}>
+                {pendingPreview ? <SubmittingPreview kind={pendingPreview.kind} background={continueCreating} /> : job ? (
                   previewUrl && unreadable !== previewKey ? (
                     job.kind === 'video' ? (
                       <video
@@ -775,7 +824,7 @@ function App() {
                       />
                     )
                   ) : (
-                    <JobPreviewState key={job.id} job={job} promptOnly={needsNewModel(job)} configure={() => editJobConnection(job)} reuse={() => reuse(job)}
+                    <JobPreviewState key={job.id} job={job} background={continueCreating} promptOnly={needsNewModel(job)} configure={() => editJobConnection(job)} reuse={() => reuse(job)}
                       retry={previewUrl && unreadable === previewKey ? () => setUnreadable('') : undefined} />
                   )
                 ) : (
@@ -794,17 +843,14 @@ function App() {
               <div className="detail panel">
                 <div className="detail-heading">
                   <b>
-                    {job
+                    {pendingPreview ? pendingPreview.prompt : job
                       ? job.prompt || siteTemplate(job.model)?.Name || '作品'
                       : frameUrl ? '视频首帧已就绪' : kind === 'video'
                         ? '示例镜头提示词'
                         : '示例提示词'}
                   </b>
-                  {job && <button className="link" onClick={() => {
-                    show('')
-                    document.getElementById('prompt')?.focus({ preventScroll: true })
-                  }}>继续创作</button>}
-                  {!job && !frameUrl && (
+                  {job && !foregroundActive && !pendingPreview && <button className="link" onClick={continueCreating}>继续创作</button>}
+                  {!pendingPreview && !job && !frameUrl && (
                     <button
                       className="link"
                       onClick={() => {
@@ -817,7 +863,7 @@ function App() {
                   )}
                 </div>
                 <p>
-                  {job
+                  {pendingPreview ? '正在建立任务记录。' : job
                     ? [
                         statusLabels[job.status],
                         siteTemplate(job.model)?.Name ?? job.profileName,
@@ -869,7 +915,7 @@ function App() {
                         打开原文件
                       </button>
                     )}
-                    {job.status !== 'failed' && <button onClick={() => void attempt(() => reuse(job))}>复用参数</button>}
+                    {!foregroundActive && job.status !== 'failed' && <button onClick={() => void attempt(() => reuse(job))}>复用参数</button>}
                     {jobComparison && <button onClick={() => compare(jobComparison)}>查看双模型对比</button>}
                     {job.file && job.kind === 'image' && (
                       <>
@@ -904,18 +950,17 @@ function App() {
                     onChange={(e) => {
                       const value = e.target.value
                       change(old => ({ ...old, service: value, compare: '' }))
-                      show('')
+                      if (!foregroundActive && !pendingPreview) show('')
                     }}
                   >
-                    <option value="@site">AIGC 创作空间 · 官网</option>
+                    <optgroup label="内置官网">
+                      <option value="@site">AIGC 创作空间 · 官网</option>
+                    </optgroup>
                     {staleService && <option value={composer.service} disabled>原服务已移除，请重新选择</option>}
-                    {externals
-                      .filter((p) => mediaKind(p.ProtocolId) === kind)
-                      .map((p) => (
-                        <option key={p.Id} value={p.Id}>
-                          {p.Name}
-                        </option>
-                      ))}
+                    {groupProfiles(externals.filter(p => mediaKind(p.ProtocolId) === kind)).map(group =>
+                      <optgroup key={group.id} label={group.name}>
+                        {group.profiles.map(p => <option key={p.Id} value={p.Id}>{p.Name}</option>)}
+                      </optgroup>)}
                   </select>
                   <button
                     title="管理模型连接"
@@ -955,7 +1000,7 @@ function App() {
                       onChange={(e) => {
                         const value = e.target.value
                         change(old => ({ ...old, compare: '', templates: { ...old.templates, [id]: value } }))
-                        show('')
+                        if (!foregroundActive && !pendingPreview) show('')
                       }}
                     >
                       {templates
@@ -975,7 +1020,7 @@ function App() {
                       const nextKey=JSON.stringify([id,kind,profile.BaseUrl,value])
                       change(old => ({ ...old, compare: '', models: { ...old.models, [id]: value },
                         variants:{...old.variants,[nextKey]:old.variants[nextKey]??{...draft}} }))
-                      show('')
+                      if (!foregroundActive && !pendingPreview) show('')
                     }}>
                       {staleModel && <option disabled value={composer.models[profile.Id]}>原模型已移除，请重新选择</option>}
                       {profileModels(profile).map((model) => (
@@ -1002,10 +1047,11 @@ function App() {
                   : workspace.latest && <button className="link resume-shot" onClick={() => {
                     const item = workspace.latest!
                     workspace.select(item.kind, item.shot)
-                    setKind(item.kind); show(''); pageTo('create')
+                    setKind(item.kind); show('', item.kind); pageTo('create')
                   }}>继续上次分镜 · {workspace.latest.shot.label}</button>}
                 {hasPrompt && (
-                  <Prompt
+                  <ExpandableText
+                    id="prompt" label="提示词" autoGrow
                     value={prompt}
                     change={text}
                     tools={<PromptOptimizer key={promptScope} kind={kind} shot={shot} assets={assets} composer={composer} references={references}
@@ -1016,7 +1062,7 @@ function App() {
                         action: mediaAction, submitting: busy, error: review.error,
                         submit: choice => void generate(choice), close: () => setGenerationReview(null),
                       } : undefined} />}
-                    hint={
+                    placeholder={
                       (native && currentTemplate.Text?.Hint) ||
                       (kind === 'video'
                         ? '描述场景、动作和镜头运动…'
@@ -1276,7 +1322,7 @@ function App() {
                   )}
               </div>
               <div className="generate-foot">
-                {recent && <div className="latest-task" role="group" aria-label="最近提交的任务">
+                {recent && shown !== recent.id && <div className="latest-task" role="group" aria-label="最近提交的任务">
                   <div aria-live="polite" aria-atomic="true">
                     <small>最近提交 · {statusLabels[recent.status] || recent.status}</small>
                     <span title={recent.prompt}>{recentIssue?.title || recent.prompt || siteTemplate(recent.model)?.Name || recent.model}</span>
@@ -1306,11 +1352,12 @@ function App() {
                 </label>}
                 <button
                   className="primary generate"
-                  disabled={busy || !data || mismatches.length>0 || staleService || staleModel || (kind === 'image' && !!composer.compare && !peer)}
+                  disabled={busy || foregroundActive || !data || mismatches.length>0 || staleService || staleModel || (kind === 'image' && !!composer.compare && !peer)}
                   onClick={e => { if (e.detail <= 1) void generate() }}
                 >
                   {busy
                     ? '正在添加任务…'
+                    : foregroundActive ? '正在' + (job.kind === 'image' ? '生成图片' : '生成视频') + '…'
                     : needsKey
                       ? '连接官网 Key'
                       : !hasPrompt ? '处理视频'
@@ -1324,7 +1371,8 @@ function App() {
             selectedId={chosen} select={choose} inspect={inspect} makeVideo={j => continueWithImage(j, 'video')}
             settings={integrations} configureStorage={() => settingsPage('storage')} report={say} attempt={attempt}/>
         ) : page === 'settings' ? (
-          <Settings section={section} select={setSection} integrations={integrations} reload={loadSettings}
+          <Settings section={section} select={next => { setEditActiveWriter(false); setSection(next) }} integrations={integrations} reload={loadSettings}
+            editActiveWriter={editActiveWriter} selectWriter={selectWriter} switchingWriter={switchingWriter}
             profiles={externals} official={official} edit={(official, profile) => edit({ official, profile })}
             remove={remove} keyStorage={data?.keyStorage ?? ''}
             folder={() => void attempt(() => window.studio.folder())}
@@ -1353,6 +1401,11 @@ function App() {
       {helpOpen && <UsageHelp close={() => setHelpOpen(false)} settings={target => { setHelpOpen(false); settingsPage(target) }} />}
       {historyOpen && integrations?.developerMode && <RequestHistory close={() => setHistoryOpen(false)} />}
       {comparison && <ComparisonDialog group={comparisons.find(g => g.id === comparison.id) ?? comparison}
+        background={() => {
+          compare(null)
+          if (comparison.jobIds.includes(shown)) continueCreating()
+          else say('对比任务已转入后台。')
+        }}
         inspect={j => { compare(null); inspect(j, true) }}
         jobs={jobs} close={() => compare(null)} selected={() => {
           refreshScripts(n => n + 1)
@@ -1389,4 +1442,7 @@ function App() {
     </div>
   )
 }
-createRoot(document.getElementById('root')!).render(<App />)
+createRoot(document.getElementById('root')!, {
+  onUncaughtError: error => { reportScriptError('react', error); console.error(error) },
+  onRecoverableError: error => { reportScriptError('react', error); console.error(error) },
+}).render(<App />)

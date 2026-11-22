@@ -52,7 +52,7 @@ export async function exerciseTwoShots({ page, base, fixture, record, state, sho
   await button('剧本').click()
   await button('手写或粘贴分镜').click()
   await page.getByLabel('剧本标题').fill(title)
-  await page.getByLabel('粘贴分镜', { exact: true }).fill('镜头 1 雨中红伞\n画面：红伞走过街口\n台词：雨还没停。\n镜头 2 清晨蓝桥\n画面：蓝桥横跨河面')
+  await page.getByLabel('分镜正文', { exact: true }).fill('镜头 1 雨中红伞\n画面：红伞走过街口\n台词：雨还没停。\n镜头 2 清晨蓝桥\n画面：蓝桥横跨河面')
   await button('拆分并预览').click()
   const editor = dialog('手工分镜')
   assert.equal(await editor.locator('fieldset').count(), 2)

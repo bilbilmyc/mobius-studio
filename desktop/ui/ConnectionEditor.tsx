@@ -7,14 +7,17 @@ import {
   isSite,
   mediaKind,
   presets,
+  serviceGroupIds,
+  serviceGroupNames,
   siteBase,
+  suggestedServiceGroup,
   type EditProfile,
   type ProfileView,
   type Protocol,
   type RelayMap,
 } from '../shared'
 import { Modal } from './Editor'
-import { ModelPicker, useModelCatalog } from './ModelPicker'
+import { AdditionalModels, ModelPicker, parseModelIds, useModelCatalog } from './ModelPicker'
 import { ServiceError } from './UsageHelp'
 import {
   WorkflowSettings,
@@ -40,6 +43,7 @@ export function ConnectionEditor({
   const [p, set] = useState<EditProfile>(() => ({
     id: official ? '@site' : profile?.Id,
     name: official ? 'AIGC 创作空间' : (profile?.Name ?? ''),
+    serviceGroup: official ? undefined : profile?.ServiceGroup ?? 'auto',
     protocol: official
       ? 'rh-image'
       : (profile?.ProtocolId ??
@@ -60,7 +64,7 @@ export function ConnectionEditor({
   })
   const models = catalog.models ?? []
   const [additional, setAdditional] = useState(profile?.Models?.join('\n') ?? '')
-  const patch = (k: keyof EditProfile, v: string) => {
+  const patch = (k: 'name' | 'base' | 'model' | 'key', v: string) => {
     set((old) => ({ ...old, ...(k === 'base' && v !== old.base ? { key: '' } : {}), [k]: v }))
   }
   const [controls, setControls] = useState(
@@ -87,7 +91,7 @@ export function ConnectionEditor({
       const input = {
         ...p,
         base: official || p.protocol === 'comfy-image' ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
-        models: official ? undefined : additional.split(/[\n,，]+/).map((s) => s.trim()).filter(Boolean),
+        models: official ? undefined : parseModelIds(additional),
         controls: official ? undefined : controls,
         relay: isCustom(p.protocol) ? relay : undefined,
       }
@@ -122,99 +126,58 @@ export function ConnectionEditor({
         }}
       >
         <div className="dialog-body fields">
-          {official ? (
-            <>
+          <fieldset className="connection-fields">
+            <legend>{official ? '内置官网' : '服务连接'}</legend>
+            {official ? <>
               <strong>AIGC 创作空间</strong>
-              <p className="help">
-                图片和视频默认使用此官网。OpenAPI Key 用于这个官网的生成任务。
-              </p>
-            </>
-          ) : (
-            <>
-              <label>
-                连接名称
-                <input
-                  required
-                  value={p.name}
-                  placeholder="例如：我的模型中转站"
-                  onChange={(e) => patch('name', e.target.value)}
-                />
-              </label>
-              <label>
-                接口协议
-                <select
-                  value={p.protocol}
-                  onChange={(e) => select(e.target.value as Protocol)}
-                >
-                  {(Object.keys(presets) as Protocol[])
-                    .filter((id) => !isSite(id))
-                    .map((id) => (
-                      <option key={id} value={id}>
-                        {presets[id].title}
-                      </option>
-                    ))}
+              <p className="help">图片与视频共用这个官网的 OpenAPI Key。</p>
+            </> : <>
+              <label>服务分组
+                <select value={p.serviceGroup} onChange={e => set({ ...p, serviceGroup: e.target.value as EditProfile['serviceGroup'] })}>
+                  <option value="auto">自动分组（{serviceGroupNames[suggestedServiceGroup(p.protocol, p.base)]}）</option>
+                  {serviceGroupIds.map(id => <option key={id} value={id}>{serviceGroupNames[id]}</option>)}
                 </select>
               </label>
-              <label>
-                服务根地址
-                <input
-                  required
-                  type="url"
-                  value={p.base}
+              <div className="form-pair">
+                <label>连接名称
+                  <input required value={p.name} placeholder="例如：我的模型中转站" onChange={e => patch('name', e.target.value)} />
+                </label>
+                <label>接口协议
+                  <select value={p.protocol} onChange={e => select(e.target.value as Protocol)}>
+                    {(Object.keys(presets) as Protocol[]).filter(id => !isSite(id) || id === profile?.ProtocolId)
+                      .map(id => <option key={id} value={id}>{presets[id].title}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label>服务根地址
+                <input required type="url" value={p.base}
                   placeholder={p.protocol.startsWith('wan-') ? '百炼工作空间的服务地址，含 /api/v1' : 'https://你的服务商/v1'}
-                  onChange={(e) => patch('base', e.target.value)}
-                />
+                  onChange={e => patch('base', e.target.value)} />
               </label>
               {p.protocol === 'openai-image' && p.base !== 'https://api.openai.com/v1' && (
                 <button type="button" className="link align-left" onClick={() => patch('base', 'https://api.openai.com/v1')}>使用 OpenAI 官方地址</button>
               )}
-            </>
-          )}
-          {p.protocol === 'comfy-image' && <p className="help">连接已启动的 ComfyUI，获取本机已安装的 SD 1.x 或 SDXL checkpoint。普通本机服务可将 Key 留空。</p>}
-          <label>
-            API Key
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={p.key}
-              placeholder={profile?.hasKey ? '同一地址留空可沿用已保存的 Key' : '填写此服务签发的 Key'}
-              onChange={(e) => patch('key', e.target.value)}
-            />
-          </label>
-          {!official && <>
-              <ModelPicker label="模型 ID" value={p.model} change={value => patch('model', value)}
-                catalog={catalog} canFetch={!!p.base.trim()} disabled={busy} />
-              <details>
-                <summary>同一连接的其他模型</summary>
-                <label>
-                  备选模型 ID
-                  <textarea rows={3} value={additional} placeholder="每行一个，与上面的模型共用接口协议和输出参数"
-                    onChange={(e) => setAdditional(e.target.value)} />
-                </label>
-                {models.length > 0 && (
-                  <label>
-                    从列表加入备选模型
-                    <select value="" onChange={(e) => {
-                      const value = e.target.value
-                      if (value) setAdditional((old) => [old.trim(), value].filter(Boolean).join('\n'))
-                    }}>
-                      <option value="">选择要加入的模型</option>
-                      {models.filter((m) => m !== p.model && !additional.split(/[\n,，]+/).some((s) => s.trim() === m))
-                        .map((m) => <option key={m}>{m}</option>)}
-                    </select>
-                  </label>
-                )}
-              </details>
-          </>}
-          <small>{storage}</small>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={!!p.sessionOnly}
-              onChange={(e) => set({ ...p, sessionOnly: e.target.checked })}
-            />
-            新填的 Key 仅在本次打开期间使用
-          </label>
+              {p.protocol === 'comfy-image' && <p className="help">连接已启动的 ComfyUI，获取本机已安装的 SD 1.x 或 SDXL checkpoint。普通本机服务可将 Key 留空。</p>}
+            </>}
+            <label>API Key
+              <input type="password" autoComplete="new-password" value={p.key}
+                placeholder={profile?.hasKey ? '同一地址留空可沿用已保存的 Key' : '填写此服务签发的 Key'}
+                onChange={e => patch('key', e.target.value)} />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={!!p.sessionOnly} onChange={e => set({ ...p, sessionOnly: e.target.checked })} />
+              新填的 Key 仅在本次打开期间使用
+            </label>
+            <small>{storage}</small>
+          </fieldset>
+          {!official && <fieldset className="connection-fields">
+            <legend>此服务的模型</legend>
+            <ModelPicker label="模型 ID" value={p.model} change={value => patch('model', value)}
+              catalog={catalog} canFetch={!!p.base.trim()} disabled={busy} />
+            <AdditionalModels text={additional} change={setAdditional} primary={p.model} catalog={models}
+              hint="每行一个，与上面的模型共用接口协议和输出参数" />
+            <ControlSettings key={p.protocol} protocol={p.protocol} controls={controls} change={setControls} />
+          </fieldset>}
           {isCustom(p.protocol) && (
             <fieldset>
               <legend>接口映射</legend>
@@ -326,14 +289,6 @@ export function ConnectionEditor({
               />
               <ExtraParameters relay={relay} change={setRelay} />
             </>
-          )}
-          {!official && (
-            <ControlSettings
-              key={p.protocol}
-              protocol={p.protocol}
-              controls={controls}
-              change={setControls}
-            />
           )}
           {err && <ServiceError message={err} />}
         </div>
