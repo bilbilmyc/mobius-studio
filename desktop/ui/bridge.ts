@@ -4,6 +4,11 @@ import type { Bridge } from '../shared'
 import { sizedExport } from './gpuExport'
 import type { PerformanceMode } from '../shared'
 const api: Bridge = {
+  promptSession: scope => invoke('prompt_session', { scope }),
+  updatePromptSession: (scope, revision, turn) => invoke('update_prompt_session', { scope, revision, turn }),
+  savePromptMemory: (scope, previous, memory) => invoke('save_prompt_memory', { scope, previous, memory }),
+  promptShotContext: shot => invoke('prompt_shot_context', { shot }),
+  promptAgentStep: (target, messages) => invoke('prompt_agent_step', { target, messages }),
   optimizePrompt: input => invoke('optimize_prompt', { input }),
   createScript: story => invoke('create_script', { story }),
   shotDrafts: () => invoke('list_shot_drafts'),

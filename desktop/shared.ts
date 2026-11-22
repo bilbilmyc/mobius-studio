@@ -1,3 +1,4 @@
+import type { PromptAgentBridge } from './agent/types'
 import rawTemplates from '../src/RhTemplates.json'
 import generationPresets from '../src/GenerationPresets.json'
 
@@ -448,7 +449,7 @@ export type OptimizationMode = 'polish' | 'enrich'
 export type PromptReferences = 'none' | 'reference' | 'first_frame' | 'last_frame' | 'first_last'
 export interface PromptOptimization { prompt: string; kind: MediaKind; mode: OptimizationMode; references: PromptReferences }
 export interface PromptResult { text: string; model: string }
-export interface OptimizedPrompt extends PromptResult { mode: OptimizationMode; references?: PromptReferences }
+export interface OptimizedPrompt extends PromptResult { source?: 'conversation'; mode: OptimizationMode; references?: PromptReferences }
 export interface PromptSuggestion extends OptimizedPrompt { original: string; edited?: boolean }
 export interface ShotDraft { shot: ShotLink; kind: MediaKind; editor: Composer; updated: number }
 export interface Comparison { id: string; jobIds: [string, string]; selected: string | null }
@@ -511,7 +512,7 @@ export function jobStatusGroup(status: string): JobStatusGroup {
   return 'attention'
 }
 
-export interface Bridge {
+export interface Bridge extends PromptAgentBridge {
   optimizePrompt(input: PromptOptimization): Promise<PromptResult>
   createScript(story: Screenplay): Promise<Script>
   shotDrafts(): Promise<ShotDraft[]>

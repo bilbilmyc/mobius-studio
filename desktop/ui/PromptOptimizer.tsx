@@ -2,10 +2,11 @@ import { useReducer, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   type Composer, type Integrations, type MediaKind, type OptimizationMode, type Picked,
-  type PromptOptimization, type PromptReferences, type PromptSuggestion,
+  type PromptOptimization, type PromptReferences, type PromptSuggestion, type ShotLink,
 } from '../shared'
 import { frameOrder } from './Assets'
 import { Modal } from './Editor'
+import { PromptChat } from './PromptChat'
 import { ServiceError } from './UsageHelp'
 
 export const optimizationModes = { polish: '润色原意', enrich: '丰富细节' } as const
@@ -24,9 +25,9 @@ export function generationCandidate(composer: Composer, input: PromptOptimizatio
 }
 
 export function adoptPrompt(old: Composer, suggestion: PromptSuggestion): Composer {
-  const { text, model, mode, references } = suggestion
+  const { text, model, mode, references, source } = suggestion
   return {
-    ...old, prompt: text, suggestion: undefined, appliedOptimization: { text, model, mode, references },
+    ...old, prompt: text, suggestion: undefined, appliedOptimization: { text, model, mode, references, source },
     promptBeforeOptimization: old.appliedOptimization?.text === text && old.prompt === text
       ? old.promptBeforeOptimization : old.prompt,
   }
@@ -75,7 +76,8 @@ interface Props {
   start: (mode: OptimizationMode) => void
   change: (edit: (old: Composer) => Composer) => void
   configure: () => void
-  shotLabel?: string
+  shot?: ShotLink
+  assets: Picked[]
   kind: MediaKind
   references: PromptReferences
   generation?: {
@@ -89,7 +91,7 @@ interface Props {
   }
 }
 
-export function PromptOptimizer({ composer, writer, activity, start, change, configure, shotLabel, kind, references, generation }: Props) {
+export function PromptOptimizer({ composer, writer, activity, start, change, configure, shot, assets, kind, references, generation }: Props) {
   const [open, show] = useState(false)
   const [mode, select] = useState<OptimizationMode>('polish')
   const originalField = useRef<HTMLTextAreaElement>(null)
@@ -136,8 +138,14 @@ export function PromptOptimizer({ composer, writer, activity, start, change, con
       <button className="link" title="恢复采用前的提示词" onClick={restore}>还原原文</button>}
     {(open || generation) && createPortal(<Modal title={generation ? '生成前优化' : '优化提示词'} wide close={close} initialFocus={originalField}>
       <div className="dialog-body optimizer-body">
-        <div className="optimizer-context"><span>{[shotLabel, kind === 'image' ? '图片' : '视频'].filter(Boolean).join(' · ')}</span>
-          {writer?.model && <small>{writer.model}</small>}</div>
+        <div className="optimizer-context"><span>{[shot?.label, kind === 'image' ? '图片' : '视频'].filter(Boolean).join(' · ')}</span>
+          {writer?.model && <small>{writer.model}</small>}
+          {!generation && <PromptChat writer={writer} context={{ scope: { kind, shot }, original: composer.prompt,
+            candidate: suggestion?.text ?? '', references, assets }} useDraft={turn => {
+              const text = turn.prompt
+              if (text) change(old => ({ ...old, suggestion: { original: turn.original, text,
+                source: 'conversation', model: turn.model, mode, references } }))
+            }} />}</div>
         {generation ? <div className="generation-review-models"><b>{optimizationModes[generation.input.mode]}</b><span>{generation.models}</span></div> :
         <div role="group" aria-label="优化方式" className="optimizer-modes">
           {(Object.keys(optimizationModes) as OptimizationMode[]).map(key =>
@@ -149,7 +157,7 @@ export function PromptOptimizer({ composer, writer, activity, start, change, con
         <div className="optimizer-columns">
           <label>原文<textarea aria-label="优化原文" ref={originalField} readOnly={submitting} value={composer.prompt}
             onChange={e => editOriginal(e.target.value)} placeholder="输入或粘贴提示词" /></label>
-          <label><span>优化稿 {suggestion && <small>{suggestion.model ? `${optimizationModes[suggestion.mode]} · ${suggestion.model}` : '手动编辑'}</small>}</span>
+          <label><span>优化稿 {suggestion && <small>{suggestion.model ? `${suggestion.source === 'conversation' ? '对话改稿' : optimizationModes[suggestion.mode]} · ${suggestion.model}` : '手动编辑'}</small>}</span>
             <textarea aria-label="优化稿" value={suggestion?.text ?? ''} readOnly={submitting}
               placeholder={busy ? '正在优化，也可直接写入自己的版本' : '可直接写优化稿，或点击「开始优化」'}
               onChange={e => editSuggestion(e.target.value)} /></label>

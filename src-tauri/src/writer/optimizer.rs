@@ -1,9 +1,6 @@
-use crate::{
-    jobs::Studio,
-    model::{route, Result},
-    provider::json_response,
-};
+use crate::{jobs::Studio, model::Result};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::{json, Value};
 
 #[derive(Deserialize)]
@@ -13,7 +10,7 @@ pub enum Optimization {
     Enrich,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Medium {
     Image,
@@ -45,33 +42,6 @@ pub struct PromptResult {
 }
 
 impl Studio {
-    /// Both writing tools use the same configured endpoint and scoped credential.
-    pub(crate) async fn writer_completion(
-        &self,
-        system: &str,
-        user: &str,
-        json_object: bool,
-    ) -> Result<(String, Value)> {
-        let writer = self.store.preferences()?.writer;
-        let key = self.store.vault.get(&writer, &writer.base_url)?;
-        if key.is_empty() {
-            return Err("请在设置的「剧本模型」中填写 API Key。".into());
-        }
-        let mut body = json!({ "model": writer.model, "stream": false, "messages": [
-            { "role": "system", "content": system }, { "role": "user", "content": user }
-        ]});
-        if json_object {
-            body["response_format"] = json!({"type":"json_object"});
-        }
-        let request = self
-            .http
-            .post(route(&writer.base_url, "chat/completions")?)
-            .bearer_auth(&key)
-            .json(&body);
-        let reply = json_response(request, &key).await.map_err(|e| e.message)?;
-        Ok((writer.model, reply))
-    }
-
     pub async fn optimize_prompt(&self, input: PromptInput) -> Result<PromptResult> {
         if input.prompt.trim().is_empty() {
             return Err("请先写下想优化的提示词。".into());
@@ -101,36 +71,8 @@ impl Studio {
         let (model, reply) = self
             .writer_completion(&system, &input.prompt, false)
             .await?;
-        let choice = &reply["choices"][0];
-        if choice["finish_reason"] == "length" {
-            return Err("优化稿被截断，请缩短原文后重试。".into());
-        }
-        if choice["finish_reason"] == "content_filter"
-            || choice["message"]["refusal"]
-                .as_str()
-                .is_some_and(|s| !s.trim().is_empty())
-        {
-            return Err("文本模型未提供这段提示词的优化稿。".into());
-        }
-        let content = &choice["message"]["content"];
-        let text = match content {
-            Value::String(text) => text.clone(),
-            Value::Array(parts) => parts
-                .iter()
-                .filter(|part| part["type"] == "text")
-                .filter_map(|part| part["text"].as_str())
-                .collect::<Vec<_>>()
-                .join(""),
-            _ => String::new(),
-        };
-        let text = text.trim();
-        if text.is_empty() {
-            return Err("文本模型没有返回优化稿，请重试。".into());
-        }
-        Ok(PromptResult {
-            model,
-            text: text.to_owned(),
-        })
+        let text = super::provider::completion_text(&reply)?;
+        Ok(PromptResult { model, text })
     }
 }
 

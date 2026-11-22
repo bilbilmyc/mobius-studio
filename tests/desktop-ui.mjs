@@ -25,6 +25,7 @@ import { exerciseGenerationOptimization, generationFixture } from './generation-
 import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
 import { exerciseRoadmap } from './project-roadmap.mjs'
 import { exerciseDelivery } from './delivery-specs.mjs'
+import { agentFixture, exerciseAgent, exerciseLiveAgent, prepareLiveWriter } from './prompt-agent.mjs'
 import { waitForValue } from './wait-for-value.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
@@ -203,6 +204,13 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  if (process.argv.includes('--agent-live')) {
+    await prepareLiveWriter(data, process.env.MOBIUS_LIVE_WRITER_SETTINGS)
+    await start()
+    await exerciseLiveAgent(page, restartNormally)
+    assert.deepEqual(errors, [])
+    return
+  }
   const oldId = 'a'.repeat(32)
   await writeFile(path.join(data, '作品', 'old.png'), png)
   await writeFile(
@@ -267,6 +275,7 @@ async function run() {
   const background = backgroundFixture(clip, still)
   const twoShots = shotFixture(temp)
   const optimizer = optimizerFixture(png)
+  const agent = agentFixture()
   const generation = generationFixture(png, clip)
   const help = taskHelpFixture(png, video)
   const deliveryCalls = []
@@ -283,6 +292,7 @@ async function run() {
     }
     if (await help.handle(req, res, bytes)) return
     if (await generation.handle(req, res, bytes)) return
+    if (await agent.handle(req, res, bytes)) return
     if (await optimizer.handle(req, res, bytes)) return
     if (await twoShots.handle(req, res, bytes)) return
     if (background.handle(req, res, bytes)) return
@@ -405,6 +415,8 @@ async function run() {
   const checkShots = () => exerciseTwoShots({ page, base, fixture: twoShots, record, state, shot, restart: restartNormally })
   const checkOptimizer = () => exerciseOptimizer({ page, base, fixture: optimizer, record, shot, restart: restartNormally,
     referenceFile: path.join(data, '作品', 'old.png') })
+  const checkAgent = () => exerciseAgent({ page, base, fixture: agent, restart: restartNormally, referenceFile: path.join(data, '作品', 'old.png') })
+  if (process.argv.includes('--agent-only')) { await checkAgent(); assert.deepEqual(errors, []); return }
   const checkGeneration = () => exerciseGenerationOptimization({ page, base, fixture: generation, record, state, done, shot,
     restart: restartNormally, firstFrame: path.join(data, '作品', 'old.png'), lastFrame: path.join(root, 'src', 'orbit.png'), video,
     processingTemplate: templates.find(t => t.Video && !t.Text).Key })
@@ -844,6 +856,7 @@ async function run() {
   await checkHelp()
   await checkDelivery()
   await checkRoadmap()
+  await checkAgent()
   assert.deepEqual(errors, [])
 }
 try {

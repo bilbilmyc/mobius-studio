@@ -1005,7 +1005,7 @@ function App() {
                   <Prompt
                     value={prompt}
                     change={text}
-                    tools={<PromptOptimizer key={promptScope} kind={kind} shotLabel={shot?.label} composer={composer} references={references}
+                    tools={<PromptOptimizer key={promptScope} kind={kind} shot={shot} assets={assets} composer={composer} references={references}
                       writer={integrations?.writer} activity={promptRequests.entries.get(promptScope)} change={editOptimization}
                       configure={() => settingsPage('writer')} start={optimizeCurrent}
                       generation={review ? {

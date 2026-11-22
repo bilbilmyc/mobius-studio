@@ -118,13 +118,6 @@ fn integration_settings(s: Core) -> Result<Value> {
     s.store.settings_view()
 }
 #[tauri::command]
-async fn save_writer(s: Core<'_>, input: preferences::WriterInput) -> Result<()> {
-    let core = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || core.store.save_writer(input))
-        .await
-        .map_err(|e| e.to_string())?
-}
-#[tauri::command]
 async fn save_storage(
     s: Core<'_>,
     target: preferences::StorageTarget,
@@ -161,14 +154,6 @@ fn save_performance(s: Core, mode: preferences::PerformanceMode) -> Result<()> {
 #[tauri::command]
 fn performance_mode(s: Core) -> Result<preferences::PerformanceMode> {
     Ok(s.store.preferences()?.performance)
-}
-#[tauri::command]
-async fn generate_script(s: Core<'_>, brief: String, count: usize) -> Result<screenplay::Script> {
-    s.generate_script(brief, count).await
-}
-#[tauri::command]
-async fn optimize_prompt(s: Core<'_>, input: writer::PromptInput) -> Result<writer::PromptResult> {
-    s.optimize_prompt(input).await
 }
 #[tauri::command]
 fn edit_script(s: Core, id: String, story: screenplay::Screenplay) -> Result<screenplay::Script> {
@@ -675,12 +660,17 @@ pub fn run() {
             thumbnails::job_thumbnail,
             thumbnails::video_poster,
             thumbnails::save_video_poster,
-            save_writer,
+            writer::commands::save_writer,
             save_storage,
             upload_image,
             list_scripts,
-            generate_script,
-            optimize_prompt,
+            writer::commands::generate_script,
+            writer::commands::optimize_prompt,
+            writer::commands::prompt_session,
+            writer::commands::update_prompt_session,
+            writer::commands::save_prompt_memory,
+            writer::commands::prompt_shot_context,
+            writer::commands::prompt_agent_step,
             create_script,
             list_shot_drafts,
             save_shot_draft,
