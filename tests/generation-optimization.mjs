@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
+import { waitForValue } from './wait-for-value.mjs'
 
 const imagePrompt = '雨后的码头，一把黄伞。'
 const imageProposal = '雨后的码头上立着一把黄伞，木板上留着清晰的倒影。'
@@ -89,10 +90,9 @@ export async function exerciseGenerationOptimization({ page, base, fixture, reco
     await page.waitForFunction(value => document.querySelector('textarea[aria-label="优化稿"]')?.value === value, text)
   }
   async function checkJob(text, index) {
-    const match = { text, sceneId: script.scenes[index].id }
-    await page.waitForFunction(async ({ text, sceneId }) => (await window.studio.state()).jobs
-      .some(j => j.prompt === text && j.shot?.sceneId === sceneId), match)
-    const job = (await state()).jobs.find(j => j.prompt === text && j.shot?.sceneId === match.sceneId)
+    const sceneId = script.scenes[index].id
+    const job = await waitForValue(async () => (await state()).jobs.find(j => j.prompt === text && j.shot?.sceneId === sceneId),
+      `the reviewed prompt to be submitted for scene ${index + 1}`)
     return done(job.id)
   }
   async function pick(label, file) {

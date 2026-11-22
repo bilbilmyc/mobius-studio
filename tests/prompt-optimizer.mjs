@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
+import { waitForValue } from './wait-for-value.mjs'
 
 const imageA = 'Three red umbrellas at the west entrance. Keep the sign “OPEN”.'
 const imageB = '清晨的蓝桥，桥面上只有一辆自行车。'
@@ -158,7 +159,8 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
   await shot('丰富细节对照')
   await Promise.race([fixture.started, delay(10000, null, { ref: false }).then(() => { throw Error('First writer request did not arrive') })])
   fixture.release()
-  await page.waitForFunction(async text => (await window.studio.shotDrafts()).some(d => d.editor.suggestion?.text === text), polished)
+  await waitForValue(() => page.evaluate(async text => (await window.studio.shotDrafts()).some(d => d.editor.suggestion?.text === text), polished),
+    'the background suggestion to be saved to its shot')
   const latestPrompt = await page.evaluate(async () => (await window.studio.shotDrafts())[0].editor.prompt)
   assert.equal(latestPrompt, imageB, 'A background reply changed which draft is resumed on startup')
   assert.equal(await original().inputValue(), imageB)

@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { spawnSync } from 'node:child_process'
 import { readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
+import { waitForValue } from './wait-for-value.mjs'
 
 export async function exerciseRoadmap({ page, data, temp, png, video, templates, restart }) {
   const calls = [],
@@ -547,12 +548,9 @@ export async function exerciseRoadmap({ page, data, temp, png, video, templates,
     await page.getByLabel('生成模型', { exact: true }).selectOption('paint')
     await page.getByLabel('同模型候选数').selectOption('2')
     await button('生成 2 张候选').click()
-    await page.waitForFunction(
-      async () =>
-        (await window.studio.state()).jobs.filter(
-          (j) => j.prompt === '用界面验证遮罩与候选' && j.status === 'done'
-        ).length === 2
-    )
+    await waitForValue(() => page.evaluate(async () =>
+      (await window.studio.state()).jobs.filter(j => j.prompt === '用界面验证遮罩与候选' && j.status === 'done').length === 2
+    ), 'both masked image candidates to finish')
     assert.deepEqual(pictures.at(-1), { n: 2, mask: true, multipart: true })
     await button('作品库').click()
     await page.getByLabel('搜索作品').fill('用界面验证遮罩与候选')

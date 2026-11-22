@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { waitForValue } from './wait-for-value.mjs'
 
 export function comfyFixture(png) {
   const graphs = [],
@@ -123,20 +124,11 @@ export async function exerciseComfy({ page, base, done, shot, fixture }) {
       assert.equal(await page.getByLabel('重绘强度').inputValue(), '0.45')
     }
     await button('生成图片').click()
-    await page.waitForFunction(
-      async (n) =>
-        (await window.studio.state()).jobs.filter((j) => j.protocol === 'comfy-image').length === n,
-      i + 1,
-    )
-    const j = await page.evaluate(
-      async (mode) =>
-        (await window.studio.state()).jobs.find(
-          (j) => j.protocol === 'comfy-image' && j.settings.mode === mode,
-        ),
-      mode,
-    )
-    assert.ok(j, 'Expected ComfyUI mode '+mode+'; persisted '+JSON.stringify(await page.evaluate(async()=>(await window.studio.state()).jobs.filter(j=>j.protocol==='comfy-image').map(j=>({mode:j.settings?.mode,prompt:j.prompt,status:j.status})))) )
-    assert.equal((await done(j.id)).file, true)
+    const job = await waitForValue(() => page.evaluate(async ({ mode, count }) => {
+      const jobs = (await window.studio.state()).jobs.filter(j => j.protocol === 'comfy-image')
+      return jobs.length === count && jobs.find(j => j.settings.mode === mode)
+    }, { mode, count: i + 1 }), `ComfyUI ${mode} job`)
+    assert.equal((await done(job.id)).file, true)
   }
   fixture.check()
 }

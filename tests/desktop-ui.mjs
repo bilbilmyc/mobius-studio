@@ -25,6 +25,7 @@ import { exerciseGenerationOptimization, generationFixture } from './generation-
 import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
 import { exerciseRoadmap } from './project-roadmap.mjs'
 import { exerciseDelivery } from './delivery-specs.mjs'
+import { waitForValue } from './wait-for-value.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -560,11 +561,10 @@ async function run() {
   await modelSelect.selectOption('local-image-fast')
   await prompt.fill('自定义中转站图片')
   await page.getByRole('button', { name: '生成图片' }).click()
-  await page.waitForFunction(async () =>
-    (await window.studio.state()).jobs.some(
+  await waitForValue(async () =>
+    (await state()).jobs.some(
       (j) => j.prompt === '自定义中转站图片' && j.model === 'local-image-fast' && j.status === 'done',
-    ),
-  )
+    ), 'the selected relay model to finish generating its image')
   await modelSelect.selectOption('local-image')
   await page.getByRole('button', { name: '作品库', exact: true }).click()
   await page.getByLabel('筛选作品').selectOption('image')
