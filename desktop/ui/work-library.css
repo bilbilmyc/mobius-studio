@@ -1,0 +1,187 @@
+.library-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 12px;
+  container: library / inline-size;
+}
+
+.library-collections, .collection-switch, .work-details-heading, .work-media-info {
+  display: flex;
+  align-items: center;
+}
+.library-collections {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.collection-switch { gap: 4px; }
+.collection-switch button {
+  position: relative;
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--dim);
+}
+.collection-switch button[aria-pressed='true'] { color: var(--aqua); }
+.collection-switch button[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto 10px -9px;
+  height: 2px;
+  background: var(--aqua);
+}
+.library-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.library-export { margin-inline-start: auto; }
+.library-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(98px, auto) minmax(100px, auto);
+  align-items: stretch;
+  gap: 8px;
+}
+.library-content {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(248px, 28%, 330px);
+  gap: 16px;
+}
+.library-browser {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.library-browser:only-child { grid-column: 1 / -1; }
+.library-results { min-width: 0; }
+.library-results .gallery {
+  grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
+  gap: 12px;
+}
+.library-results .gallery-single { grid-template-columns: minmax(0, 1fr); }
+.gallery-single .thumb {
+  width: 100%;
+  max-height: min(59vh, 520px);
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+}
+.gallery-single .thumb img, .gallery-single .thumb video { object-fit: contain; }
+.gallery-single .card { row-gap: 2px; }
+.work-card-meta { display: grid; gap: 3px; margin: 4px 12px 0; min-width: 0; }
+.work-card-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-single .work-card-meta { display: flex; align-items: baseline; gap: 10px; }
+@media (hover: hover) and (pointer: fine) {
+  .work-card:not(:hover):not(:focus-within):not(:has(.selected)) .card-to-video { opacity: 0; }
+}
+.library-content :focus-visible { outline-offset: -2px; }
+
+.work-details {
+  align-self: start;
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #49515e transparent;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px;
+  background: var(--panel);
+}
+.work-details-heading { justify-content: space-between; gap: 8px; }
+.work-details-heading h2 { font-size: 16px; }
+.work-details-heading button {
+  flex: none;
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  color: var(--aqua);
+  font-size: 12px;
+}
+.work-description { min-width: 0; margin-top: 12px; }
+.work-media-info { gap: 7px; color: var(--dim); font-size: 12px; }
+.work-media-info span + span::before { content: '·'; margin-right: 7px; }
+.work-details .work-prompt {
+  margin: 6px 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  color: inherit;
+}
+.work-facts {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.work-facts div { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 8px; }
+.work-facts dt { color: var(--dim); }
+.work-facts dd { margin: 0; overflow-wrap: anywhere; }
+.work-marks {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.work-mark-actions, .work-tag-entry { display: grid; gap: 7px; }
+.work-mark-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.work-mark-actions button[aria-pressed='true'] { color: var(--aqua); border-color: #497681; }
+.work-tags { margin-top: 14px; }
+.work-tags label { margin-bottom: 5px; }
+.work-tag-entry { grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; }
+.work-tag-entry button { padding-inline: 9px; }
+.work-marks [role='alert'] { display: block; margin-top: 7px; overflow-wrap: anywhere; }
+.work-details .cloud-save { display: grid; gap: 6px; margin-top: 10px; }
+.work-details .cloud-save button { width: 100%; }
+
+@container library (min-width: 561px) and (max-width: 740px) {
+  .library-content { gap: 12px; grid-template-columns: minmax(0, 1fr) 235px; }
+  .gallery-single .thumb { max-height: min(43vh, 360px); }
+  .work-details { padding: 12px; }
+  .work-details .work-prompt { -webkit-line-clamp: 1; }
+  .work-description, .work-tags { margin-top: 7px; }
+  .work-marks { margin-top: 8px; padding-top: 8px; }
+  .work-details .cloud-save { margin-top: 8px; }
+  .work-facts { margin-top: 8px; padding-top: 7px; gap: 3px; }
+}
+@container library (max-width: 560px) {
+  .library-content { display: block; overflow: auto; }
+  .library-results { flex: none; overflow: auto hidden; padding-bottom: 5px; }
+  .library-results .gallery:not(.gallery-single) {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: clamp(142px, 31%, 192px);
+    gap: 9px;
+  }
+  .gallery-single .thumb { max-height: min(28vh, 215px); }
+  .work-details {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px 16px;
+    max-height: none;
+    overflow: visible;
+    margin-top: 12px;
+  }
+  .work-details-heading { grid-column: 1 / -1; }
+  .work-description, .work-marks { margin-top: 0; }
+  .work-marks { border: 0; padding: 0; }
+  .work-details .cloud-save { grid-column: 2; grid-row: 3; margin: 0; padding: 0; border: 0; }
+  .work-facts { align-self: start; grid-column: 1; grid-row: 3; margin: 0; }
+}
+@container library (max-width: 450px) {
+  .library-collections { gap: 5px 8px; }
+  .collection-switch { flex-basis: 100%; }
+  .collection-switch button[aria-pressed='true']::after { bottom: 0; }
+  .library-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .library-search { grid-column: 1 / -1; }
+  .work-details { display: block; }
+  .work-description, .work-marks, .work-details .cloud-save, .work-facts { margin-top: 12px; }
+}

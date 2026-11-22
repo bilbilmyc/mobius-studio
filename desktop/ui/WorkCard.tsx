@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { siteTemplate, statusLabels, type JobView, type PerformanceMode } from '../shared'
 import { LibraryThumbnail } from './LibraryThumbnail'
 
@@ -7,6 +8,7 @@ interface Props {
   performance: PerformanceMode
   job: JobView
   selected: boolean
+  featured: boolean
   choose: () => void
   inspect: () => void
   makeVideo: () => void
@@ -14,10 +16,12 @@ interface Props {
   copyImage: (link: boolean) => void
 }
 
-export function WorkCard({ job, selected, choose, inspect, makeVideo, saveOriginal, copyImage, performance }: Props) {
+export function WorkCard({ job, selected, featured, choose, inspect, makeVideo, saveOriginal, copyImage, performance }: Props) {
   const card = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [failedPreview, setFailedPreview] = useState<string>()
   const canUseImage = job.kind === 'image' && job.status === 'done' && job.file && !!job.mediaPath
+  const original = featured && canUseImage && failedPreview !== job.mediaPath ? job.mediaPath : undefined
   const title = job.prompt || siteTemplate(job.model)?.Name || '视频处理'
 
   function openMenu(x: number, y: number) {
@@ -49,6 +53,7 @@ export function WorkCard({ job, selected, choose, inspect, makeVideo, saveOrigin
 
   return <article className="work-card">
     <button ref={card} className={'card' + (selected ? ' selected' : '')}
+      aria-pressed={selected}
       aria-haspopup={canUseImage ? 'menu' : undefined}
       onClick={choose} onDoubleClick={inspect}
       onContextMenu={e => {
@@ -64,9 +69,16 @@ export function WorkCard({ job, selected, choose, inspect, makeVideo, saveOrigin
           openMenu(rect.left + 12, rect.top + 12)
         }
       }}>
-      <LibraryThumbnail job={job} mode={performance} />
-      <b>{title}</b><em>{statusLabels[job.status]}</em>
-      <small>{new Date(job.created).toLocaleDateString()} · {siteTemplate(job.model)?.Name ?? job.profileName}</small>
+      {original ? (
+        <div className="thumb">
+          <img src={convertFileSrc(original)} alt="" decoding="async" onError={() => setFailedPreview(original)} />
+        </div>
+      ) : <LibraryThumbnail job={job} mode={performance} />}
+      <b>{title}</b>
+      <span className="work-card-meta">
+        <em>{statusLabels[job.status] || job.status}</em>
+        <small>{new Date(job.created).toLocaleDateString()} · {siteTemplate(job.model)?.Name || job.profileName}</small>
+      </span>
     </button>
     {canUseImage && <button className="card-to-video" onClick={makeVideo} title="以这张图片作为视频首帧">图生视频 <span aria-hidden="true">↗</span></button>}
     {menu && createPortal(<div className="work-menu" role="menu" aria-label="图片作品操作" ref={popup}

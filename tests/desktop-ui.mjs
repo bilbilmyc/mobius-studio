@@ -18,6 +18,7 @@ import { chromium } from 'playwright-core'
 import { creationMock, exerciseCreation } from './creation-matrix.mjs'
 import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
 import { comfyFixture, exerciseComfy, seedGallery, exerciseGallery } from './studio-24.mjs'
+import { exerciseLibraryLayout } from './library-layout.mjs'
 import { backgroundFixture, exerciseBackgroundTasks } from './background-tasks.mjs'
 import { shotFixture, exerciseTwoShots } from './two-shot-workspace.mjs'
 import { exerciseOptimizer, optimizerFixture } from './prompt-optimizer.mjs'
@@ -252,6 +253,13 @@ async function run() {
     }),
   )
   const videoFile = path.join(temp, 'clip.mp4')
+  if (process.argv.includes('--library-layout-only')) {
+    await seedGallery(data)
+    await start()
+    await exerciseLibraryLayout(page)
+    assert.deepEqual(errors, [])
+    return
+  }
   const ff = spawnSync('ffmpeg', [
     '-hide_banner',
     '-loglevel',
@@ -859,6 +867,7 @@ async function run() {
   await page.getByText('性能设置已保存。',{exact:true}).waitFor()
   await shot('性能设置')
   await exerciseGallery({page,shot})
+  await exerciseLibraryLayout(page)
   await page.getByRole('button',{name:'设置',exact:true}).click()
   await page.getByLabel('性能模式').selectOption('eco')
   await page.waitForFunction(()=>document.querySelector('.shell')?.dataset.performance==='eco')
