@@ -1,7 +1,7 @@
 use crate::{
     domain::{route, Result},
     generation::jobs::Studio,
-    providers::provider::json_response,
+    providers::json_response,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ pub(crate) struct Message {
     pub content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct WriterTarget {
     pub base: String,
     pub model: String,
@@ -56,6 +56,18 @@ impl Studio {
         json_object: bool,
         target: Option<&WriterTarget>,
     ) -> Result<(String, Value)> {
+        let mut body = json!({ "messages": messages });
+        if json_object {
+            body["response_format"] = json!({"type":"json_object"});
+        }
+        self.writer_request(body, target).await
+    }
+
+    pub(super) async fn writer_request(
+        &self,
+        mut body: Value,
+        target: Option<&WriterTarget>,
+    ) -> Result<(String, Value)> {
         let writer = self.store.preferences()?.writer;
         if target.is_some_and(|t| t.base != writer.base_url || t.model != writer.model) {
             return Err("文本模型连接已更换，请用当前连接重新发送。".into());
@@ -64,10 +76,8 @@ impl Studio {
         if key.is_empty() {
             return Err("请在设置的「剧本模型」中填写 API Key。".into());
         }
-        let mut body = json!({ "model": writer.model, "stream": false, "messages": messages });
-        if json_object {
-            body["response_format"] = json!({"type":"json_object"});
-        }
+        body["model"] = json!(writer.model);
+        body["stream"] = json!(false);
         let request = self
             .http
             .post(route(&writer.base_url, "chat/completions")?)

@@ -253,3 +253,18 @@ input.library-search { width: clamp(170px, 24vw, 340px); }
 .chat-history blockquote { border-inline-start: 1px solid var(--line); padding-inline-start: 10px; }
 .chat-history button { justify-self: start; }
 .prompt-chat small { color: var(--dim); }
+
+.template-library, .template-preview, .template-edit, .template-import { display:grid; gap:10px; }
+.template-library label { display:grid; gap:5px; min-width:0; }
+.template-search { display:flex; align-items:center; gap:12px; }
+.template-search input[type=search] { flex:1; min-width:0; }
+.template-search .check { display:flex; align-items:center; gap:5px; }
+.template-library pre { margin:0; padding:10px; border-inline-start:2px solid var(--aqua); max-height:22vh; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; background:#12161e; }
+.template-preview > button { justify-self:start; }
+.template-variables { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr)); gap:8px; }
+.template-manage { border-top:1px solid var(--line); padding-top:8px; }
+.template-manage summary { cursor:pointer; }
+.template-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-block:7px; }
+.template-library small { color:var(--dim); overflow-wrap:anywhere; }
+.template-edit textarea { min-height:96px; }
+.template-library select { width:100%; min-width:0; }

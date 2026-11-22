@@ -1,7 +1,7 @@
 use crate::{
     app::Core,
     domain::{route, Result},
-    providers::provider,
+    providers,
     storage::files::{read, save},
 };
 use serde::{Deserialize, Serialize};
@@ -70,8 +70,8 @@ pub async fn cancel_remote(s: Core<'_>, id: String) -> Result<String> {
         .ok_or("缺少有效的远端任务号。")?;
     let url = route(&j.base_url, &format!("api/jobs/{remote}/cancel"))?;
     let key = s.store.key(&j)?;
-    let value = provider::json_response(
-        provider::auth(
+    let value = providers::json_response(
+        providers::auth(
             s.http.post(url).timeout(std::time::Duration::from_secs(20)),
             "bearer",
             &key,

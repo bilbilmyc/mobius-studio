@@ -51,7 +51,7 @@ fn thumbnail_reuses_cache_and_detects_replaced_originals() {
 
 #[test]
 fn legacy_scene_links_survive_edits_and_reject_unrelated_jobs() {
-    use crate::projects::screenplay::ShotLink;
+    use crate::domain::ShotLink;
     let temp = tempfile::tempdir().unwrap();
     let store = Store::new(temp.path().into()).unwrap();
     let script_id = id();

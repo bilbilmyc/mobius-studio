@@ -3,7 +3,7 @@ use crate::{
     domain::{route, Job, Result},
     generation::creation::dimensions,
     providers::inputs::Input,
-    providers::provider::{auth, json_response, protect_text, Fault, Output, Reply},
+    providers::{auth, json_response, protect_text, Fault, Output, Reply},
 };
 use reqwest::{multipart::Form, Client};
 use serde_json::{json, Value};
@@ -224,7 +224,7 @@ pub async fn query(h: &Client, job: &Job, key: &str, encoded_id: &str) -> Reply<
     let history = route(&job.base_url, &format!("history/{encoded_id}"))?;
     let get = |url| {
         json_response(
-            auth(h.get(url), "bearer", key).timeout(crate::providers::provider::POLL_TIMEOUT),
+            auth(h.get(url), "bearer", key).timeout(crate::providers::POLL_TIMEOUT),
             key,
         )
     };

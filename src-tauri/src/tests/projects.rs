@@ -1,8 +1,8 @@
 use crate::{
+    domain::ShotLink,
     domain::{id, Job, Profile},
     generation::jobs::Studio,
     projects::project_archive,
-    projects::screenplay::ShotLink,
     projects::shot_drafts::ShotDraft,
     storage::files::save,
     storage::store::Store,

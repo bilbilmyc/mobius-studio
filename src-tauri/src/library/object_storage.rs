@@ -1,5 +1,5 @@
 use crate::{
-    domain::{canonical_base, kind, Job, Result},
+    domain::{canonical_base, kind, CloudCopy, Job, Result},
     generation::jobs::Studio,
     media::formats::mime,
     storage::preferences::{Preferences, StorageProvider, StorageTarget},
@@ -8,17 +8,9 @@ use http::header::{CONTENT_TYPE, HOST};
 use reqsign_aliyun_oss::{Credential, RequestSigner, SigningVersion};
 use reqsign_core::{Context, SignRequest};
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{path::Path, sync::OnceLock, time::Duration};
 use tokio_util::io::ReaderStream;
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct CloudCopy {
-    pub status: String,
-    pub uri: String,
-    pub endpoint: String,
-    pub detail: String,
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

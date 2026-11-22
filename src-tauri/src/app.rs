@@ -31,6 +31,7 @@ pub fn run() {
         }));
     }
     builder
+        .manage(writer::tool_calls::Runs::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -162,10 +163,16 @@ pub fn run() {
             writer::commands::generate_script,
             writer::commands::optimize_prompt,
             writer::commands::prompt_agent_step,
+            writer::commands::finish_prompt_run,
             writer::commands::prompt_session,
             writer::commands::prompt_shot_context,
             writer::commands::save_prompt_memory,
             writer::commands::save_writer,
+            writer::templates::commands::prompt_templates,
+            writer::templates::commands::find_prompt_templates,
+            writer::templates::commands::parse_prompt_templates,
+            writer::templates::commands::change_prompt_templates,
+            writer::templates::commands::export_prompt_templates,
             writer::commands::update_prompt_session,
         ])
         .run(tauri::generate_context!())

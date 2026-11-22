@@ -1,0 +1,23 @@
+[
+  {
+    "id": "builtin-product-light",
+    "name": "产品布光",
+    "medium": "image",
+    "description": "给产品照片安排构图、材质和主光。",
+    "body": "为{{主体}}拍摄一张产品图。背景为{{背景}}，以{{光线}}塑造轮廓，保留材质纹理，主体清晰。"
+  },
+  {
+    "id": "builtin-frame-transition",
+    "name": "首尾帧过渡",
+    "medium": "video",
+    "description": "把两个状态写成一段连续镜头。",
+    "body": "从{{开始画面}}出发，镜头{{运镜}}，主体自然过渡到{{结束画面}}，结尾停稳。"
+  },
+  {
+    "id": "builtin-scene-continuity",
+    "name": "场景连续性",
+    "medium": "any",
+    "description": "在多镜创作中延续人物和场景设定。",
+    "body": "沿用{{人物设定}}与{{场景设定}}。本镜表现{{动作}}，保持服饰、光源方向和空间关系一致。"
+  }
+]

@@ -1,7 +1,7 @@
 use crate::{
     domain::{canonical_base, route, Result},
     generation::jobs::Studio,
-    providers::provider::{auth, response_json, Fault, Reply},
+    providers::{auth, response_json, Fault, Reply},
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

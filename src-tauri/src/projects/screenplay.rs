@@ -1,5 +1,5 @@
 use crate::{
-    domain::{id, valid_id, Result},
+    domain::{id, valid_id, Result, ShotLink},
     generation::jobs::Studio,
     storage::files::{read, save},
     storage::store::Store,
@@ -9,15 +9,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     fs,
 };
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShotLink {
-    pub script_id: String,
-    pub scene_id: String,
-    #[serde(default)]
-    pub label: String,
-}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

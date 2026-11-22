@@ -106,6 +106,48 @@ pub struct Controls {
     pub custom_size: bool,
 }
 impl Relay {
+    pub fn workflow(&self, mode: &str) -> (&str, &str, &str) {
+        if let Some(w) = self.workflows.get(mode) {
+            (&w.submit, &w.body, &w.encoding)
+        } else {
+            (&self.submit, &self.body, &self.encoding)
+        }
+    }
+    fn check_workflows(&self, base: &str, video: bool) -> Result<()> {
+        let valid = |s: &str| matches!(s, "" | "json" | "multipart");
+        if !valid(&self.encoding) {
+            return Err("请求格式无效。".into());
+        }
+        for (mode, w) in &self.workflows {
+            if !(if video {
+                matches!(mode.as_str(), "first_frame" | "first_last" | "reference")
+            } else {
+                mode == "i2i"
+            }) || !valid(&w.encoding)
+            {
+                return Err("接口的创作方式或格式无效。".into());
+            }
+            route(base, &w.submit)?;
+            let body: Value = serde_json::from_str(&w.body)
+                .map_err(|e| format!("带素材请求体 JSON 无效：{e}"))?;
+            if !body.is_object() {
+                return Err("请求体必须是 JSON 对象。".into());
+            }
+            let has = |key: &str| w.body.contains(&format!("{{{{{key}}}}}"));
+            let images = has("images") || has("images_base64");
+            let first = has("first_frame") || has("first_frame_base64") || has("image");
+            let last = has("last_frame") || has("last_frame_base64");
+            if !match mode.as_str() {
+                "first_last" => images || (first && last),
+                "reference" => images || has("videos") || has("audios"),
+                _ => images || first,
+            } {
+                return Err(format!("「{mode}」请求体缺少对应的素材占位符。"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, base: &str, video: bool) -> Result<()> {
         route(base, &self.submit)?;
         if !matches!(
@@ -161,7 +203,7 @@ impl Relay {
                 return Err(format!("请求体中缺少参数占位符 {token}"));
             }
         }
-        crate::generation::creation::check_workflows(self, base, video)?;
+        self.check_workflows(base, video)?;
         Ok(())
     }
 }

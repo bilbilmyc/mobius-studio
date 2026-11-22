@@ -1,7 +1,7 @@
 use crate::{
     domain::*,
     media::formats::{media_format, mime},
-    providers::provider::{self, Fault, Output},
+    providers::{self, Fault, Output},
     storage::store::Store,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -43,7 +43,7 @@ impl Studio {
             has_batches: std::sync::atomic::AtomicBool::new(store.home.join("批次").is_dir()),
             batch_gate: Default::default(),
             store,
-            http: provider::client()?,
+            http: providers::client()?,
             cloud_transfer: Default::default(),
             active: Default::default(),
             notify: Box::new(notify),
@@ -405,7 +405,7 @@ impl Studio {
                     let path = if crate::generation::creation::remote(&a.path) {
                         a.path.clone()
                     } else {
-                        provider::upload(&self.http, j, &key, a, &self.store.input(&a.path)?)
+                        providers::upload(&self.http, j, &key, a, &self.store.input(&a.path)?)
                             .await?
                     };
                     let list = uploaded
@@ -435,7 +435,7 @@ impl Studio {
                 ));
             }
             self.update(j, "submitting", "正在向所选服务提交。")?;
-            let result = provider::submit(&self.http, j, &key, uploaded, &inputs).await?;
+            let result = providers::submit(&self.http, j, &key, uploaded, &inputs).await?;
             if let Output::Ticket(id) = &result {
                 j.remote_id = Some(id.clone());
                 self.store.save_job(j)?
@@ -469,7 +469,7 @@ impl Studio {
         j: &mut Job,
         items: Vec<Output>,
         key: &str,
-    ) -> provider::Reply<()> {
+    ) -> providers::Reply<()> {
         let count = j.candidate_ids.len();
         if items.is_empty() || items.len() > count {
             return Err(Fault::known("服务商返回的候选数与请求不符，请核对记录。"));
@@ -511,7 +511,7 @@ impl Studio {
         fs::remove_file(self.group_file(&j.id)).map_err(Fault::known)?;
         Ok(())
     }
-    async fn poll_result(&self, j: &mut Job, key: &str) -> provider::Reply<Output> {
+    async fn poll_result(&self, j: &mut Job, key: &str) -> providers::Reply<Output> {
         const RETRIES: u32 = 3;
         if j.retry_at.is_none() && j.status != "waiting" {
             self.update(j, "waiting", "已取得任务编号，正在查询进度。")?;
@@ -540,7 +540,7 @@ impl Studio {
             {
                 return Err(Fault::known("服务端已受理取消。"));
             }
-            match provider::query(&self.http, j, key).await {
+            match providers::query(&self.http, j, key).await {
                 Ok(Output::Pending(detail)) => {
                     failures = 0;
                     if recovering || j.detail != detail {
@@ -592,7 +592,7 @@ impl Studio {
         let mut file = tokio::fs::File::from_std(stage.reopen().map_err(Fault::known)?);
         match result {
             Output::Url(u) => {
-                let response = provider::download(&self.http, j, &u, key).await?;
+                let response = providers::download(&self.http, j, &u, key).await?;
                 let expected = response.content_length();
                 let mut n = 0u64;
                 let mut chunks = response.bytes_stream();

@@ -25,7 +25,9 @@ import { exerciseGenerationOptimization, generationFixture } from './generation-
 import { exerciseTaskHelp, taskHelpFixture } from './task-guidance.mjs'
 import { exerciseRoadmap } from './project-roadmap.mjs'
 import { exerciseDelivery } from './delivery-specs.mjs'
+import { templateFixture, exerciseTemplates, exerciseCommunityFile } from './prompt-templates.mjs'
 import { agentFixture, exerciseAgent, exerciseLiveAgent, prepareLiveWriter } from './prompt-agent.mjs'
+import { exerciseLiveMedia } from './media-live.mjs'
 import { waitForValue } from './wait-for-value.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
@@ -47,6 +49,7 @@ const errors = [],
   requests = [],
   tickets = new Map()
 let child, browser, page, relay, files
+let keepPaidTestHome = false
 
 async function listen(handler) {
   const server = createServer(
@@ -204,6 +207,20 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  if (process.argv.includes('--media-live')) {
+    keepPaidTestHome=true
+    await start()
+    await exerciseLiveMedia({page,data,templates,profilesFile:process.env.MOBIUS_LIVE_MEDIA_PROFILES,output:process.env.MOBIUS_LIVE_MEDIA_OUTPUT})
+    keepPaidTestHome=false
+    assert.deepEqual(errors,[])
+    return
+  }
+  if (process.argv.includes('--community-templates')) {
+    await start()
+    await exerciseCommunityFile(page,process.env.MOBIUS_COMMUNITY_CSV)
+    assert.deepEqual(errors, [])
+    return
+  }
   if (process.argv.includes('--agent-live')) {
     await prepareLiveWriter(data, process.env.MOBIUS_LIVE_WRITER_SETTINGS)
     await start()
@@ -276,6 +293,7 @@ async function run() {
   const twoShots = shotFixture(temp)
   const optimizer = optimizerFixture(png)
   const agent = agentFixture()
+  const promptTemplates = templateFixture()
   const generation = generationFixture(png, clip)
   const help = taskHelpFixture(png, video)
   const deliveryCalls = []
@@ -292,6 +310,7 @@ async function run() {
     }
     if (await help.handle(req, res, bytes)) return
     if (await generation.handle(req, res, bytes)) return
+    if (promptTemplates.handle(req,res,bytes)) return
     if (await agent.handle(req, res, bytes)) return
     if (await optimizer.handle(req, res, bytes)) return
     if (await twoShots.handle(req, res, bytes)) return
@@ -416,6 +435,8 @@ async function run() {
   const checkOptimizer = () => exerciseOptimizer({ page, base, fixture: optimizer, record, shot, restart: restartNormally,
     referenceFile: path.join(data, '作品', 'old.png') })
   const checkAgent = () => exerciseAgent({ page, base, fixture: agent, restart: restartNormally, referenceFile: path.join(data, '作品', 'old.png') })
+  const checkTemplates = () => exerciseTemplates({page,base,fixture:promptTemplates,data,restart:restartNormally})
+  if (process.argv.includes('--templates-only')) { await checkTemplates(); assert.deepEqual(errors, []); return }
   if (process.argv.includes('--agent-only')) { await checkAgent(); assert.deepEqual(errors, []); return }
   const checkGeneration = () => exerciseGenerationOptimization({ page, base, fixture: generation, record, state, done, shot,
     restart: restartNormally, firstFrame: path.join(data, '作品', 'old.png'), lastFrame: path.join(root, 'src', 'orbit.png'), video,
@@ -857,6 +878,7 @@ async function run() {
   await checkDelivery()
   await checkRoadmap()
   await checkAgent()
+  await checkTemplates()
   assert.deepEqual(errors, [])
 }
 try {
@@ -865,7 +887,8 @@ try {
   await stop()
   await closeServer(files)
   await closeServer(relay)
-  await rm(temp, {
+  if (keepPaidTestHome) console.log('Paid test data retained at '+temp)
+  else await rm(temp, {
     recursive: true,
     force: true,
     maxRetries: 5,

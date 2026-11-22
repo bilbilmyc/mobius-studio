@@ -7,6 +7,7 @@ import {
 import { frameOrder } from './Assets'
 import { Modal } from './Editor'
 import { PromptChat } from './PromptChat'
+import { PromptTemplates } from './PromptTemplates'
 import { ServiceError } from './UsageHelp'
 
 export const optimizationModes = { polish: '润色原意', enrich: '丰富细节' } as const
@@ -25,9 +26,9 @@ export function generationCandidate(composer: Composer, input: PromptOptimizatio
 }
 
 export function adoptPrompt(old: Composer, suggestion: PromptSuggestion): Composer {
-  const { text, model, mode, references, source } = suggestion
+  const { text, model, mode, references, source, templateName } = suggestion
   return {
-    ...old, prompt: text, suggestion: undefined, appliedOptimization: { text, model, mode, references, source },
+    ...old, prompt: text, suggestion: undefined, appliedOptimization: { text, model, mode, references, source, templateName },
     promptBeforeOptimization: old.appliedOptimization?.text === text && old.prompt === text
       ? old.promptBeforeOptimization : old.prompt,
   }
@@ -140,6 +141,8 @@ export function PromptOptimizer({ composer, writer, activity, start, change, con
       <div className="dialog-body optimizer-body">
         <div className="optimizer-context"><span>{[shot?.label, kind === 'image' ? '图片' : '视频'].filter(Boolean).join(' · ')}</span>
           {writer?.model && <small>{writer.model}</small>}
+          {!generation && <PromptTemplates kind={kind} seed={suggestion?.text || composer.prompt} applyLabel="放入优化稿" apply={(text,name) =>
+            change(old => ({ ...old, suggestion: { original:old.prompt, text, model:'', source:'template', templateName:name, mode, references } }))}/>}
           {!generation && <PromptChat writer={writer} context={{ scope: { kind, shot }, original: composer.prompt,
             candidate: suggestion?.text ?? '', references, assets }} useDraft={turn => {
               const text = turn.prompt
@@ -157,7 +160,7 @@ export function PromptOptimizer({ composer, writer, activity, start, change, con
         <div className="optimizer-columns">
           <label>原文<textarea aria-label="优化原文" ref={originalField} readOnly={submitting} value={composer.prompt}
             onChange={e => editOriginal(e.target.value)} placeholder="输入或粘贴提示词" /></label>
-          <label><span>优化稿 {suggestion && <small>{suggestion.model ? `${suggestion.source === 'conversation' ? '对话改稿' : optimizationModes[suggestion.mode]} · ${suggestion.model}` : '手动编辑'}</small>}</span>
+          <label><span>优化稿 {suggestion && <small>{suggestion.source === 'template' ? '模板 · ' + suggestion.templateName : suggestion.model ? `${suggestion.source === 'conversation' ? '对话改稿' : optimizationModes[suggestion.mode]} · ${suggestion.model}` : '手动编辑'}</small>}</span>
             <textarea aria-label="优化稿" value={suggestion?.text ?? ''} readOnly={submitting}
               placeholder={busy ? '正在优化，也可直接写入自己的版本' : '可直接写优化稿，或点击「开始优化」'}
               onChange={e => editSuggestion(e.target.value)} /></label>

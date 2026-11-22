@@ -449,7 +449,7 @@ export type OptimizationMode = 'polish' | 'enrich'
 export type PromptReferences = 'none' | 'reference' | 'first_frame' | 'last_frame' | 'first_last'
 export interface PromptOptimization { prompt: string; kind: MediaKind; mode: OptimizationMode; references: PromptReferences }
 export interface PromptResult { text: string; model: string }
-export interface OptimizedPrompt extends PromptResult { source?: 'conversation'; mode: OptimizationMode; references?: PromptReferences }
+export interface OptimizedPrompt extends PromptResult { source?: 'conversation' | 'template'; templateName?: string; mode: OptimizationMode; references?: PromptReferences }
 export interface PromptSuggestion extends OptimizedPrompt { original: string; edited?: boolean }
 export interface ShotDraft { shot: ShotLink; kind: MediaKind; editor: Composer; updated: number }
 export interface Comparison { id: string; jobIds: [string, string]; selected: string | null }

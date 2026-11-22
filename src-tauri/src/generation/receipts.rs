@@ -1,7 +1,7 @@
 use crate::{
     app::Core,
     domain::{route, site, Job, Result},
-    providers::provider,
+    providers,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -42,10 +42,10 @@ async fn lookup(
             .get(route(&job.base_url, "alltasks")?)
             .query(&[("page", page), ("page_size", 50)])
             .timeout(std::time::Duration::from_secs(20));
-        let raw = provider::json_response(provider::auth(request, "x-auth-token", &key), &key)
+        let raw = providers::json_response(providers::auth(request, "x-auth-token", &key), &key)
             .await
             .map_err(|e| e.message)?;
-        let data = provider::envelope(raw, &key).map_err(|e| e.message)?;
+        let data = providers::envelope(raw, &key).map_err(|e| e.message)?;
         let rows = data["tasks"]
             .as_array()
             .ok_or("官网未返回本账户的任务清单，暂时无法核对归属。")?;

@@ -2,7 +2,7 @@ use super::{
     optimizer::Medium,
     sessions::{Scope, Source, Turn},
 };
-use crate::{projects::screenplay::ShotLink, storage::store::Store};
+use crate::{domain::ShotLink, storage::store::Store};
 use serde_json::json;
 
 fn turn() -> Turn {

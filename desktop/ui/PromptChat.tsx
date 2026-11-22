@@ -4,6 +4,7 @@ import type { Integrations } from '../shared'
 import { runPromptTurn, sourceLabels, type WritingContext } from '../agent/promptAgent'
 import type { PromptSession, PromptTurn } from '../agent/types'
 import { Modal } from './Editor'
+import { PromptTemplates } from './PromptTemplates'
 
 interface Props {
   context: WritingContext
@@ -86,7 +87,10 @@ function ChatDialog({ context, writer, useDraft, close }: Props & { close: () =>
   const memoryDirty = !!session && memory !== session.memory
   return <Modal title="对话改稿" wide close={close} initialFocus={field}>
     <div className="dialog-body prompt-chat">
-      <div className="optimizer-context"><span>{scope.shot?.label ?? '自由创作'} · {scope.kind === 'image' ? '图片' : '视频'}</span><small>{writer?.model}</small></div>
+      <div className="optimizer-context"><span>{scope.shot?.label ?? '自由创作'} · {scope.kind === 'image' ? '图片' : '视频'}</span><small>{writer?.model}</small>
+        <PromptTemplates kind={scope.kind} disabled={!!status} seed={context.candidate || context.original || input}
+          maxLength={Math.max(0,4000-input.length-(input ? 1 : 0))} applyLabel={input ? "追加到改稿要求" : "填入改稿要求"}
+          apply={text=>setInput(old=>old ? old+"\n"+text : text)} /></div>
       <details className="chat-memory"><summary>{scope.shot ? '本剧本的创作记忆' : '自由创作记忆'}{session?.memory ? ' · 已保存' : ''}</summary>
         <label>长期创作要求<textarea aria-label="长期创作要求" value={memory} maxLength={2000} disabled={!session || !!status}
           onChange={e => setMemory(e.target.value)} placeholder="例如：本片人物始终穿深蓝工作服，沿用冷色自然光。" /></label>

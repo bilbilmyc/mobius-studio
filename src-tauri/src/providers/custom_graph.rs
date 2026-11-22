@@ -1,7 +1,7 @@
 use crate::{
     app::Core,
     domain::{route, Job, Result},
-    providers::provider::{auth, json_response},
+    providers::{auth, json_response},
     storage::files::{read, save},
 };
 use serde::{Deserialize, Serialize};

@@ -2,7 +2,7 @@ use crate::{
     domain::{id, Result},
     generation::creation::public_source,
     media::formats::mime,
-    providers::provider::client,
+    providers::client,
 };
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};

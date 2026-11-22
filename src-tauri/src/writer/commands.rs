@@ -5,14 +5,12 @@ use super::{
 };
 use crate::storage::store::Store;
 use crate::{
-    app::Core,
-    domain::Result,
-    projects::screenplay::{self, ShotLink},
+    app::Core, domain::Result, domain::ShotLink, projects::screenplay,
     storage::preferences::WriterInput,
 };
 use serde_json::Value;
 
-async fn local_data<T: Send + 'static>(
+pub(super) async fn local_data<T: Send + 'static>(
     s: Core<'_>,
     action: impl FnOnce(&Store) -> Result<T> + Send + 'static,
 ) -> Result<T> {
@@ -77,8 +75,10 @@ pub(crate) async fn prompt_shot_context(s: Core<'_>, shot: ShotLink) -> Result<V
 pub(crate) async fn prompt_agent_step(
     s: Core<'_>,
     target: WriterTarget,
+    runs: tauri::State<'_, super::tool_calls::Runs>,
+    run: Option<super::tool_calls::Step>,
     messages: Vec<Message>,
-) -> Result<PromptResult> {
+) -> Result<super::tool_calls::StepResult> {
     if messages.len() < 2
         || messages.len() > 24
         || !matches!(messages[0].role, Role::System)
@@ -87,9 +87,21 @@ pub(crate) async fn prompt_agent_step(
     {
         return Err("改稿上下文过长或格式有误，请缩短本次输入。".into());
     }
+    if let Some(step) = run {
+        return runs.exchange(&s, &target, &messages, step).await;
+    }
     let (model, reply) = s.writer_messages(&messages, true, Some(&target)).await?;
-    Ok(PromptResult {
-        model,
-        text: completion_text(&reply)?,
+    Ok(super::tool_calls::StepResult {
+        result: PromptResult {
+            model,
+            text: completion_text(&reply)?,
+        },
+        calls: vec![],
+        unsupported: false,
     })
+}
+
+#[tauri::command]
+pub(crate) fn finish_prompt_run(runs: tauri::State<'_, super::tool_calls::Runs>, id: String) {
+    runs.close(&id)
 }

@@ -1,7 +1,7 @@
 use super::optimizer::Medium;
 use crate::{
+    domain::ShotLink,
     domain::{valid_id, Result},
-    projects::screenplay::ShotLink,
     storage::files::{read, save},
     storage::store::Store,
 };
@@ -23,6 +23,8 @@ pub(crate) struct Scope {
 pub(crate) enum Source {
     ReadShot,
     ReadReferences,
+    FindTemplates,
+    RecallDrafts,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -92,7 +94,7 @@ impl Store {
                 || !valid_text(&t.reply, 4000)
                 || !valid_text(&t.model, 256)
                 || t.prompt.as_ref().is_some_and(|p| !valid_text(p, 12000))
-                || t.sources.len() > 2
+                || t.sources.len() > 4
             {
                 return Err("改稿内容超出会话可保存的范围。".into());
             }

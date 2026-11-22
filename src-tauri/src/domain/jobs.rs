@@ -1,6 +1,23 @@
 use super::{kind, Asset, Picked, Relay};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShotLink {
+    pub script_id: String,
+    pub scene_id: String,
+    #[serde(default)]
+    pub label: String,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct CloudCopy {
+    pub status: String,
+    pub uri: String,
+    pub endpoint: String,
+    pub detail: String,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct SiteOptions {
@@ -20,7 +37,7 @@ pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_job: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shot: Option<crate::projects::screenplay::ShotLink>,
+    pub shot: Option<ShotLink>,
     pub id: String,
     pub profile_id: String,
     pub profile_name: String,
@@ -47,7 +64,7 @@ pub struct Job {
     pub result_url: Option<String>,
     pub file_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cloud: Option<crate::library::object_storage::CloudCopy>,
+    pub cloud: Option<CloudCopy>,
     pub created_utc: String,
 }
 impl Job {
@@ -77,7 +94,7 @@ pub struct Start {
     pub count: Option<usize>,
     pub repeat: Option<usize>,
     pub source_job: Option<String>,
-    pub shot: Option<crate::projects::screenplay::ShotLink>,
+    pub shot: Option<ShotLink>,
     pub profile_id: String,
     pub model: Option<String>,
     pub kind: String,

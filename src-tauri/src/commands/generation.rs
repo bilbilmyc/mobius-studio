@@ -4,7 +4,7 @@ use crate::{
     app::Core,
     domain::*,
     generation::{batches, comparisons, creation, jobs::Studio},
-    providers::provider,
+    providers,
     storage::vault,
 };
 use serde_json::{json, Value};
@@ -152,9 +152,9 @@ pub(crate) fn task_info(j: &Job) -> String {
         format!("本地记录号 {}", j.id),
         format!(
             "服务商任务号 {}",
-            provider::protect_text(j.remote_id.as_deref().unwrap_or("未取得"), "")
+            providers::protect_text(j.remote_id.as_deref().unwrap_or("未取得"), "")
         ),
-        format!("模型 {}", provider::protect_text(&j.model, "")),
+        format!("模型 {}", providers::protect_text(&j.model, "")),
         format!("接口协议 {}", j.protocol_id),
         format!("提交时间 {created}"),
         format!("任务状态 {}", j.status),

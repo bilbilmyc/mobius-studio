@@ -1,8 +1,8 @@
 use crate::{
+    domain::ShotLink,
     domain::{Asset, Picked, Result},
     generation::creation::remote,
     generation::jobs::keep_asset,
-    projects::screenplay::ShotLink,
     storage::files::{read, save},
     storage::store::Store,
 };

@@ -25,47 +25,6 @@ pub fn public_source(link: &str) -> Result<String> {
     }
     Ok(u.to_string())
 }
-pub fn workflow<'a>(r: &'a Relay, mode: &str) -> (&'a str, &'a str, &'a str) {
-    if let Some(w) = r.workflows.get(mode) {
-        (&w.submit, &w.body, &w.encoding)
-    } else {
-        (&r.submit, &r.body, &r.encoding)
-    }
-}
-pub fn check_workflows(r: &Relay, base: &str, video: bool) -> Result<()> {
-    let valid = |s: &str| matches!(s, "" | "json" | "multipart");
-    if !valid(&r.encoding) {
-        return Err("请求格式无效。".into());
-    }
-    for (mode, w) in &r.workflows {
-        if !(if video {
-            matches!(mode.as_str(), "first_frame" | "first_last" | "reference")
-        } else {
-            mode == "i2i"
-        }) || !valid(&w.encoding)
-        {
-            return Err("接口的创作方式或格式无效。".into());
-        }
-        route(base, &w.submit)?;
-        let body: Value =
-            serde_json::from_str(&w.body).map_err(|e| format!("带素材请求体 JSON 无效：{e}"))?;
-        if !body.is_object() {
-            return Err("请求体必须是 JSON 对象。".into());
-        }
-        let has = |key: &str| w.body.contains(&format!("{{{{{key}}}}}"));
-        let images = has("images") || has("images_base64");
-        let first = has("first_frame") || has("first_frame_base64") || has("image");
-        let last = has("last_frame") || has("last_frame_base64");
-        if !match mode.as_str() {
-            "first_last" => images || (first && last),
-            "reference" => images || has("videos") || has("audios"),
-            _ => images || first,
-        } {
-            return Err(format!("「{mode}」请求体缺少对应的素材占位符。"));
-        }
-    }
-    Ok(())
-}
 pub fn dimensions(size: &str) -> Option<(u32, u32)> {
     let (w, h) = size.split_once('x')?;
     let (w, h) = (w.parse().ok()?, h.parse().ok()?);
@@ -131,7 +90,7 @@ pub fn prepare_with_limit(
     }
     j.settings.insert("mode".into(), json!(mode));
     if let Some(r) = &j.relay {
-        let body = workflow(r, &mode).1;
+        let body = r.workflow(&mode).1;
         if (body.contains("{{width}}") || body.contains("{{height}}"))
             && dimensions(&j.size).is_none()
         {
@@ -170,7 +129,7 @@ pub fn prepare_with_limit(
         return Err("素材与所选创作方式不匹配，请检查数量和首尾帧顺序。".into());
     }
     if custom(&j.protocol_id) && n > 0 {
-        let body = workflow(j.relay.as_ref().unwrap(), &mode).1;
+        let body = j.relay.as_ref().unwrap().workflow(&mode).1;
         for (k, field) in [("audio", "{{audios}}"), ("video", "{{videos}}")] {
             if j.assets.iter().any(|a| a.kind == k) && !body.contains(field) {
                 return Err(format!("请求体缺少素材字段 {field}"));
@@ -284,7 +243,7 @@ pub fn prepare_with_limit(
     if res.is_empty()
         && j.relay
             .as_ref()
-            .is_some_and(|r| workflow(r, &mode).1.contains("{{resolution}}"))
+            .is_some_and(|r| r.workflow(&mode).1.contains("{{resolution}}"))
     {
         return Err("此接口需要分辨率，请在连接中填写可用分辨率。".into());
     }

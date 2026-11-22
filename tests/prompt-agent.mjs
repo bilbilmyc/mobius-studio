@@ -13,9 +13,10 @@ export function agentFixture() {
   return { calls, slow, arrived, async handle(req, res, bytes) {
     if (req.url !== '/agent-writer/v1/chat/completions') return false
     assert.equal(req.headers.authorization, 'Bearer local-agent-writer')
-    const { messages, response_format, model } = JSON.parse(bytes)
+    const { messages, response_format, model, tools } = JSON.parse(bytes)
     assert.equal(model, 'agent-fixture')
-    assert.deepEqual(response_format, { type: 'json_object' })
+    if (tools?.length) assert.ok(tools.every(t => t.type === 'function'))
+    else assert.deepEqual(response_format, { type: 'json_object' })
     assert.match(messages[0].content, /availableTools/)
     const context = messages.filter(m => m.role === 'user').map(m => {
       try { return JSON.parse(m.content) } catch { return null }
@@ -27,7 +28,7 @@ export function agentFixture() {
       assert.equal(context.medium, 'video')
       assert.equal(context.memory, note)
       if (!last.toolResult) {
-        assert.deepEqual(context.availableTools, ['read_shot', 'read_references'])
+        assert.deepEqual(context.availableTools, ['read_shot', 'read_references', 'find_templates'])
         action = { action: 'read_shot' }
       } else if (last.toolResult === 'read_shot') {
         assert.equal(last.data.heading, '窗边的搪瓷杯')
@@ -161,11 +162,12 @@ export async function exerciseLiveAgent(page, restart) {
   const open = async () => { await button('优化提示词').click(); await button('对话改稿').click() }
   const chat = () => page.getByRole('dialog', { name: '对话改稿', exact: true })
   let modelRequests = 0
+  const nativeReads = []
   async function observe() {
-    await page.exposeFunction('countWriterStep', () => { modelRequests++ })
+    await page.exposeFunction('countWriterStep', tools => { modelRequests++; nativeReads.push(...tools) })
     await page.evaluate(() => {
       const step = window.studio.promptAgentStep
-      window.studio.promptAgentStep = (...args) => { window.countWriterStep(); return step(...args) }
+      window.studio.promptAgentStep = async (...args) => { const result=await step(...args); await window.countWriterStep((result.calls ?? []).map(c=>c.name)); return result }
     })
   }
   async function send(text, index) {
@@ -186,7 +188,8 @@ export async function exerciseLiveAgent(page, restart) {
   await open()
   const b = await send('继续修改上一稿：保持杯上字母原样，把背景改成深蓝色。直接交一版完整提示词。', 1)
   assert.match(b, /KITE/); assert.match(b, /蓝|靛/)
-  assert.equal(modelRequests, 2)
+  assert.ok(modelRequests >= 2 && modelRequests <= 8)
+  const beforeShot = modelRequests
   await button('返回对照').click()
   await button('关闭对照').click()
   await page.evaluate(() => window.studio.createScript({ title: '分镜资料实测', scenes: [{
@@ -199,8 +202,18 @@ export async function exerciseLiveAgent(page, restart) {
   const c = await send('请查阅当前分镜资料，从动作栏取出箱子上的唯一编号，原样写进完整的中文图片提示词。', 0)
   assert.match(c, /ORB-731/)
   assert.match(await chat().locator('article').innerText(), /已查阅 分镜资料/)
-  assert.equal(modelRequests, 4)
+  assert.ok(modelRequests-beforeShot>=2 && modelRequests-beforeShot<=4)
+  await page.evaluate(async () => {
+    const lib=await window.studio.promptTemplates()
+    await window.studio.changePromptTemplates(lib.revision,{action:'import',templates:[
+      {name:'暗房签名',medium:'image',description:'画面必须保留的物品铭牌',body:'纸箱上的专属暗房铭牌是 TPL-418。'}]})
+  })
+  const beforeTemplate=modelRequests
+  const templated=await send('请实际查找模板库里的“暗房签名”，把模板正文中的铭牌号原样写进完整图片提示词。',1)
+  assert.match(templated,/TPL-418/)
+  assert.match(await chat().locator('article').last().innerText(),/已查阅 提示词模板/)
+  assert.ok(modelRequests-beforeTemplate>=2 && modelRequests-beforeTemplate<=4)
   const settings = await page.evaluate(() => window.studio.settings())
-  console.log('Live writer ' + settings.writer.model + ': four model calls; revised KITE across restart and independently recovered ORB-731 through the shot tool.')
+  console.log('Live writer ' + settings.writer.model + ': '+modelRequests+' model calls; KITE across restart, ORB-731 from the shot, TPL-418 from the local template. Native calls: '+nativeReads.join(', '))
 
 }

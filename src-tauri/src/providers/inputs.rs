@@ -2,7 +2,7 @@ use crate::{
     domain::{Asset, Job},
     generation::creation,
     media::formats::mime,
-    providers::provider::{Fault, Reply},
+    providers::{Fault, Reply},
     storage::store::Store,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -143,10 +143,8 @@ pub async fn mapped(
         .relay
         .as_ref()
         .ok_or_else(|| Fault::known("缺少接口映射"))?;
-    let (_, body, encoding) = creation::workflow(
-        relay,
-        j.settings.get("mode").and_then(Value::as_str).unwrap_or(""),
-    );
+    let (_, body, encoding) =
+        relay.workflow(j.settings.get("mode").and_then(Value::as_str).unwrap_or(""));
     let body: Value = serde_json::from_str(body).map_err(Fault::known)?;
     let object = body
         .as_object()
