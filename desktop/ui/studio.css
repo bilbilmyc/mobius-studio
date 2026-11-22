@@ -401,6 +401,15 @@ main {
   scrollbar-width: thin;
   scrollbar-color: #49515e transparent;
 }
+/* Draw the ring inside the control so scrolling dialogs cannot clip its edges. */
+.dialog-body :focus-visible,
+.dialog-body textarea:focus {
+  outline: 2px solid var(--aqua);
+  outline-offset: -2px;
+}
+.dialog-body textarea:focus {
+  box-shadow: none;
+}
 .settings-scroll {
   padding: 15px 16px 12px;
   display: flex;

@@ -112,6 +112,32 @@ export function templateFixture() {
   }
 }
 
+async function assertFocusIsVisible(field) {
+  const result = await field.evaluate((element) => {
+    const body = element.closest('.dialog-body')
+    const bounds = element.getBoundingClientRect()
+    const viewport = body.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    const width = parseFloat(style.outlineWidth)
+    const outside = Math.max(0, width + parseFloat(style.outlineOffset))
+    const left = viewport.left + body.clientLeft
+    const top = viewport.top + body.clientTop
+    // Client dimensions are rounded to CSS pixels at fractional Windows display scales.
+    const clipped = [
+      ['top', top - (bounds.top - outside)],
+      ['right', bounds.right + outside - (left + body.clientWidth)],
+      ['bottom', bounds.bottom + outside - (top + body.clientHeight)],
+      ['left', left - (bounds.left - outside)],
+    ].filter(([, overlap]) => overlap > 1).map(([side]) => side)
+    return {
+      focused: element === document.activeElement,
+      hasOutline: style.outlineStyle !== 'none' && width > 0,
+      clipped,
+    }
+  })
+  assert.deepEqual(result, { focused: true, hasOutline: true, clipped: [] }, String(field))
+}
+
 export async function exerciseTemplates({ page, base, fixture, data, restart }) {
   const button = (name) => page.getByRole('button', { name, exact: true })
   const picker = () => page.getByRole('dialog', { name: '提示词模板', exact: true })
@@ -175,6 +201,7 @@ export async function exerciseTemplates({ page, base, fixture, data, restart }) 
   await templates()
   const previousSize = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
   await page.setViewportSize({ width: 800, height: 650 })
+  await assertFocusIsVisible(picker().getByLabel('查找模板'))
   assert.equal(await picker().getByRole('button', { name: '导入文件', exact: true }).isVisible(), false)
   assert.ok(await picker().evaluate((el) => el.scrollWidth <= el.clientWidth + 1))
   if (process.env.MOBIUS_TEMPLATE_SCREENSHOT)
@@ -268,10 +295,16 @@ export async function exerciseTemplates({ page, base, fixture, data, restart }) 
   await openEditor()
   await optimizer().getByRole('button', { name: '对话改稿' }).click()
   await chat().getByRole('button', { name: '提示词模板' }).click()
+  await assertFocusIsVisible(picker().getByLabel('查找模板'))
+  await page.keyboard.press('Tab') // 全部媒体
+  await page.keyboard.press('Tab') // 选择模板
+  await assertFocusIsVisible(picker().getByLabel('选择模板'))
   await selectTemplate('共享构图')
   await picker().getByLabel('人物', { exact: true }).fill('小林')
   await picker().getByRole('button', { name: '填入改稿要求' }).click()
   assert.equal(await chat().getByLabel('改稿要求').inputValue(), '场景：码头，主体 小林')
+  await chat().getByLabel('改稿要求').focus()
+  await assertFocusIsVisible(chat().getByLabel('改稿要求'))
   await send(askNative)
   await chat().getByText(restored, { exact: true }).waitFor()
   assert.equal(fixture.counts.get(askNative), 2)
