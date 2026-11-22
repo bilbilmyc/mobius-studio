@@ -71,7 +71,7 @@ pub fn run() {
                 use tauri::Listener;
                 let output = store.home.join("render-result.json");
                 app.listen("mobius-render-benchmark", move |event| {
-                    if let Ok(result) = serde_json::from_str::<Value>(event.payload()) {
+                    if let Ok(result) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                         let _ = crate::storage::files::save(&output, &result);
                     }
                 });

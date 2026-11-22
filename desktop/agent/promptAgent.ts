@@ -125,14 +125,22 @@ export async function runPromptTurn(
       let calls: ToolCall[] = result.calls ?? []
       if (!calls.length) {
         let action: Action
-        try { action=actionFrom(result.text) }
-        catch(error) {
-          if (!(error instanceof UnstructuredReply) || !native || step===3) throw error
-          // Keep the tool observations, ask only for the final envelope, and spend at most one remaining step.
-          native=false
-          observations=[]
+        try {
+          action = actionFrom(result.text)
+        } catch (error) {
+          if (!(error instanceof UnstructuredReply) || !native || step === 3) throw error
+          // The message history already contains the observations for this one formatting retry.
+          native = false
+          observations = []
           available.clear()
-          messages.push({role:'user',content:JSON.stringify({availableTools:[],formatCorrection:'资料已齐，请用一个 JSON 对象交稿，含 action=draft、reply 和 prompt；若需要问创作者则用 action=reply 和 reply。'})})
+          messages.push({
+            role: 'user',
+            content: JSON.stringify({
+              availableTools: [],
+              formatCorrection:
+                '资料已齐，请用一个 JSON 对象交稿，含 action=draft、reply 和 prompt；若需要问创作者则用 action=reply 和 reply。',
+            }),
+          })
           continue
         }
         if (action.action === 'draft' || action.action === 'reply') {
