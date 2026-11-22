@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 
 const askNative = '使用银盐模板，并找回第一轮的道具编号。'
@@ -223,7 +223,7 @@ export async function exerciseTemplates({ page, base, fixture, data, restart }) 
   const exported = picker().getByRole('status').filter({ hasText: '已导出到 ' })
   await exported.waitFor()
   const file = (await exported.innerText()).replace('已导出到 ', '')
-  assert.equal(path.dirname(file), path.join(data, '作品', '导出'))
+  assert.equal(await realpath(path.dirname(file)), await realpath(path.join(data, '作品', '导出')))
   const pack = JSON.parse(await readFile(file, 'utf8'))
   assert.equal(pack.format, 'mobius-prompt-templates')
   assert.equal(pack.version, 1)
