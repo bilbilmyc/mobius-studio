@@ -1,7 +1,7 @@
 use crate::{
-    jobs::Studio,
-    model::{route, Result},
-    provider::json_response,
+    domain::{route, Result},
+    generation::jobs::Studio,
+    providers::provider::json_response,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

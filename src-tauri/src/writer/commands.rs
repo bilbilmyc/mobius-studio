@@ -3,12 +3,12 @@ use super::{
     provider::{completion_text, Message, Role, WriterTarget},
     sessions::{Scope, Snapshot, Turn},
 };
-use crate::store::Store;
+use crate::storage::store::Store;
 use crate::{
-    model::Result,
-    preferences::WriterInput,
-    screenplay::{self, ShotLink},
-    Core,
+    app::Core,
+    domain::Result,
+    projects::screenplay::{self, ShotLink},
+    storage::preferences::WriterInput,
 };
 use serde_json::Value;
 

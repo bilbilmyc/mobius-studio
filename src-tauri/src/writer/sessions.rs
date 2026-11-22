@@ -1,8 +1,9 @@
 use super::optimizer::Medium;
 use crate::{
-    model::{valid_id, Result},
-    screenplay::ShotLink,
-    store::{read, save, Store},
+    domain::{valid_id, Result},
+    projects::screenplay::ShotLink,
+    storage::files::{read, save},
+    storage::store::Store,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};

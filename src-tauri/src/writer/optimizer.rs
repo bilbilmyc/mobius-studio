@@ -1,4 +1,4 @@
-use crate::{jobs::Studio, model::Result};
+use crate::{domain::Result, generation::jobs::Studio};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json::{json, Value};
@@ -79,7 +79,7 @@ impl Studio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{preferences::WriterInput, store::Store};
+    use crate::{storage::preferences::WriterInput, storage::store::Store};
     use axum::{body::to_bytes, extract::Request, Router};
 
     #[tokio::test]
