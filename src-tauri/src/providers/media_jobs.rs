@@ -81,6 +81,7 @@ pub async fn submit(
             ),
             j,
             inputs,
+            key,
         )
         .await?;
         let v = json_response(request, key).await?;
@@ -96,15 +97,15 @@ pub async fn submit(
         )));
     }
     if proto == "openai-video" {
-        let mut form = reqwest::multipart::Form::new()
+        let mut form = crate::developer::Form::new(key)
             .text("model", j.model.clone())
             .text("prompt", j.prompt.clone())
             .text("size", j.size.clone())
             .text("seconds", j.seconds.to_string());
         if let Some(image) = inputs.first() {
-            form = form.part("input_reference", image.part().await?);
+            form = image.add_to_form(form, "input_reference").await?;
         }
-        let v = json_response(auth(post("videos")?, "bearer", key).multipart(form), key).await?;
+        let v = json_response(form.attach(auth(post("videos")?, "bearer", key)), key).await?;
         return ticket(&v, "id");
     }
     let mode = j
@@ -135,17 +136,17 @@ pub async fn submit(
         if let Some(q) = quality {
             payload["quality"] = json!(q);
         }
-        let req = if inputs.is_empty() {
-            post("images/generations")?.json(&payload)
+        let (path, req) = if inputs.is_empty() {
+            ("images/generations", None)
         } else if inputs.iter().any(|a| a.is_link()) {
             let mut images = vec![];
             for a in inputs {
                 images.push(json!({"image_url":a.url().await?}));
             }
             payload["images"] = json!(images);
-            post("images/edits")?.json(&payload)
+            ("images/edits", None)
         } else {
-            let mut form = reqwest::multipart::Form::new();
+            let mut form = crate::developer::Form::new(key);
             for (k, v) in payload.as_object().unwrap() {
                 form = form.text(
                     k.clone(),
@@ -160,14 +161,18 @@ pub async fn submit(
                 "image[]"
             };
             for a in inputs {
-                form = form.part(
-                    if a.kind == "mask" { "mask" } else { field },
-                    a.part().await?,
-                );
+                form = a
+                    .add_to_form(form, if a.kind == "mask" { "mask" } else { field })
+                    .await?;
             }
-            post("images/edits")?.multipart(form)
+            ("images/edits", Some(form))
         };
-        let v = json_response(auth(req, "bearer", key), key).await?;
+        let request = auth(post(path)?, "bearer", key);
+        let request = match req {
+            Some(form) => form.attach(request),
+            None => request.json(&payload).into(),
+        };
+        let v = json_response(request, key).await?;
         if j.native_count.is_some() {
             let rows = v["data"]
                 .as_array()

@@ -13,10 +13,10 @@ pub(crate) async fn fetch(raw: &str, kind: &str, dir: &Path) -> Result<PathBuf> 
     let mut target = url.clone();
     let mut response = None;
     for _ in 0..5 {
-        let r = http
+        let request = http
             .get(target.clone())
-            .timeout(std::time::Duration::from_secs(90))
-            .send()
+            .timeout(std::time::Duration::from_secs(90));
+        let r = crate::developer::send(request, "")
             .await
             .map_err(|_| "素材链接无法访问。")?;
         if r.status().is_redirection() {

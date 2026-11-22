@@ -52,6 +52,7 @@ import { CandidateGallery } from './CandidateGallery'
 import { ReferenceCards } from './ReferenceCards'
 import { Assets, addAssets, frameOrder } from './Assets'
 import { Settings, type SettingsSection } from './Settings'
+import { RequestHistory } from './RequestHistory'
 import { ScriptDesk } from './ScriptDesk'
 import { CloudSave } from './CloudSave'
 import { JobPreviewState } from './JobPreviewState'
@@ -135,6 +136,7 @@ function App() {
   const [exporting, setExporting] = useState(false)
   const [unreadable, setUnreadable] = useState('')
   const [section, setSection] = useState<SettingsSection>('media')
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [integrations, setIntegrations] = useState<Integrations>()
   const [openedScripts, setOpenedScripts] = useState(false)
   const [libraryView, setLibraryView] = useState(defaultLibraryView)
@@ -716,6 +718,7 @@ function App() {
         <header className="top">
           <h1>{pageNames[page]}</h1>
           <div className="top-tools">
+            {integrations?.developerMode && <button onClick={() => setHistoryOpen(true)}>请求记录</button>}
             <button className="help-launcher" aria-label="使用帮助" title="使用帮助" onClick={() => setHelpOpen(true)}>?</button>
             <BackgroundTasks jobs={jobs} inspect={j => inspect(j, true)} />
             {page === 'create' && <div className="segments media-switch" aria-label="创作类型">
@@ -1348,6 +1351,7 @@ function App() {
         />
       )}
       {helpOpen && <UsageHelp close={() => setHelpOpen(false)} settings={target => { setHelpOpen(false); settingsPage(target) }} />}
+      {historyOpen && integrations?.developerMode && <RequestHistory close={() => setHistoryOpen(false)} />}
       {comparison && <ComparisonDialog group={comparisons.find(g => g.id === comparison.id) ?? comparison}
         inspect={j => { compare(null); inspect(j, true) }}
         jobs={jobs} close={() => compare(null)} selected={() => {

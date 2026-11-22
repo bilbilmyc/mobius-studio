@@ -152,6 +152,12 @@
 
 完整字段占位符保留数据类型，宽、高和时长为数字。图片数组使用 `{{images}}`，音视频分别使用 `{{audios}}` 和 `{{videos}}`。JSON 默认发送本地文件的 data URL 或用户填写的 HTTPS 链接。仅需 Base64 的接口可用 `{{images_base64}}`、`{{first_frame_base64}}`、`{{last_frame_base64}}`。multipart 中把顶层字段直接指定为素材占位符即可上传二进制，例如 `{"image[]":"{{images}}"}` 会按选择顺序重复提交图片字段。结果字段支持 `data.0.url` 这类路径。实际可用模式和尺寸以中转站对应模型为准。
 
+### 复制实际请求的代码
+
+在「设置 → 开发者模式」开启记录，然后获取模型列表、优化提示词或提交创作。打开窗口顶部的「请求记录」，选中一次请求，切换 Bash cURL、Python 或 Go，点击「复制代码」。上传、提交、轮询和下载各占一条，可以分别查看地址、HTTP 状态和响应耗时。
+
+展开代码下方的「运行前设置环境变量」，按提示提供自己的 API Key、有效签名地址或参考文件路径。Python 示例使用 `requests`，Go 示例使用标准库。复制代码只写入剪贴板，在终端执行生成请求会重新向服务商提交。记录仅在内存中保留最近 80 条，关闭开发者模式或退出应用即可清空。
+
 ## 作品、任务与密钥
 
 便携版优先使用程序或 macOS 应用包旁的 `Data`。安装版将作品保存在当前用户的数据目录。Windows 路径为 `%APPDATA%\com.mobius.creative.studio\Data`，Linux 默认是 `~/.local/share/com.mobius.creative.studio/Data`，macOS 是 `~/Library/Application Support/com.mobius.creative.studio/Data`。可通过「设置 → 文件与工具 → 打开作品目录」直接打开作品文件夹，或用 `MOBIUS_HOME` 指定已有数据目录。发布包仅包含程序及安装元数据。

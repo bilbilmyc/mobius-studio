@@ -77,6 +77,12 @@ pub fn run() {
                 });
             }
             let handle = app.handle().clone();
+            crate::developer::enable(
+                store
+                    .preferences()
+                    .map(|p| p.developer_mode)
+                    .unwrap_or(false),
+            );
             let core = Arc::new(
                 Studio::new(store, move |id| {
                     let _ = handle.emit("jobs-changed", id);
@@ -89,6 +95,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::developer::set_developer_mode,
+            crate::developer::request_history,
+            crate::developer::request_example,
+            crate::developer::clear_request_history,
+            crate::developer::copy_request_example,
             commands::connections::discover_models,
             commands::connections::edit_profile,
             commands::connections::integration_settings,

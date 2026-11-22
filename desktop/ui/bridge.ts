@@ -4,6 +4,11 @@ import type { Bridge } from '../shared'
 import { sizedExport } from './gpuExport'
 import type { PerformanceMode } from '../shared'
 const api: Bridge = {
+  setDeveloperMode: enabled => invoke('set_developer_mode', { enabled }),
+  requestHistory: () => invoke('request_history'),
+  requestExample: id => invoke('request_example', { id }),
+  clearRequestHistory: () => invoke('clear_request_history'),
+  copyRequestExample: (id, code) => invoke('copy_request_example', { id, code }),
   promptSession: scope => invoke('prompt_session', { scope }),
   updatePromptSession: (scope, revision, turn) => invoke('update_prompt_session', { scope, revision, turn }),
   savePromptMemory: (scope, previous, memory) => invoke('save_prompt_memory', { scope, previous, memory }),

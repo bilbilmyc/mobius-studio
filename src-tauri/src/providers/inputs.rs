@@ -1,3 +1,4 @@
+use crate::developer::{Form, Outgoing};
 use crate::{
     domain::{Asset, Job},
     generation::creation,
@@ -6,7 +7,7 @@ use crate::{
     storage::store::Store,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
-use reqwest::multipart::{Form, Part};
+use reqwest::multipart::Part;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use tokio_util::io::ReaderStream;
@@ -54,16 +55,21 @@ impl Input {
             }
         }
     }
-    pub async fn part(&self) -> Reply<Part> {
+    pub async fn add_to_form<'a>(&self, form: Form<'a>, field: &str) -> Reply<Form<'a>> {
         match &self.source {
-            Source::Link(s) => Ok(Part::text(s.clone())),
+            Source::Link(s) => Ok(form.text(field, s.clone())),
             Source::Local(p) => {
                 let file = tokio::fs::File::open(p).await.map_err(Fault::known)?;
                 let len = file.metadata().await.map_err(Fault::known)?.len();
-                Part::stream_with_length(reqwest::Body::wrap_stream(ReaderStream::new(file)), len)
-                    .file_name(self.name.clone())
-                    .mime_str(mime(p).ok_or_else(|| Fault::known("未识别素材类型"))?.1)
-                    .map_err(Fault::known)
+                let mime = mime(p).ok_or_else(|| Fault::known("未识别素材类型"))?.1;
+                let part = Part::stream_with_length(
+                    reqwest::Body::wrap_stream(ReaderStream::new(file)),
+                    len,
+                )
+                .file_name(self.name.clone())
+                .mime_str(mime)
+                .map_err(Fault::known)?;
+                Ok(form.file(field, part, &self.name, mime))
             }
         }
     }
@@ -138,7 +144,8 @@ pub async fn mapped(
     request: reqwest::RequestBuilder,
     j: &Job,
     inputs: &[Input],
-) -> Reply<reqwest::RequestBuilder> {
+    key: &str,
+) -> Reply<Outgoing> {
     let relay = j
         .relay
         .as_ref()
@@ -208,13 +215,13 @@ pub async fn mapped(
         vars.insert(plural.into(), json!(urls));
     }
     if encoding != "multipart" {
-        return Ok(request.json(&render(&body, &vars)));
+        return Ok(request.json(&render(&body, &vars)).into());
     }
-    let mut form = Form::new();
+    let mut form = Form::new(key);
     for (key, v) in object {
         if let Some(token) = v.as_str().filter(|s| file_token(s)) {
             for a in parts(token, inputs) {
-                form = form.part(key.clone(), a.part().await?);
+                form = a.add_to_form(form, key).await?;
             }
         } else {
             let v = render(v, &vars);
@@ -228,5 +235,5 @@ pub async fn mapped(
             }
         }
     }
-    Ok(request.multipart(form))
+    Ok(form.attach(request))
 }

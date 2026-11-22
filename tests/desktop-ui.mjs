@@ -30,6 +30,7 @@ import { templateFixture, exerciseTemplates, exerciseCommunityFile } from './pro
 import { agentFixture, exerciseAgent, exerciseLiveAgent, prepareLiveWriter } from './prompt-agent.mjs'
 import { exerciseLiveMedia } from './media-live.mjs'
 import { waitForValue } from './wait-for-value.mjs'
+import { exampleFixture, exerciseExamples } from './request-examples.mjs'
 
 // The release WebView runs against disposable files and HTTP servers on this machine.
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -253,6 +254,14 @@ async function run() {
     }),
   )
   const videoFile = path.join(temp, 'clip.mp4')
+  if (process.argv.includes('--developer-only')) {
+    const fixture = exampleFixture(png)
+    relay = await listen(fixture.handle)
+    await start()
+    await exerciseExamples({page, base:origin(relay)+'/v1', temp, png, templates, fixture, done, record, restart:restartNormally, shot})
+    assert.deepEqual(errors,[])
+    return
+  }
   if (process.argv.includes('--library-layout-only')) {
     await seedGallery(data)
     await start()

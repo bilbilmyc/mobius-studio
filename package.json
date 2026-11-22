@@ -1,7 +1,7 @@
 {
   "name": "mobius-studio",
   "productName": "莫比环",
-  "version": "2.12.2",
+  "version": "2.13.0",
   "description": "本地图片与视频创作工作台",
   "private": true,
   "type": "module",

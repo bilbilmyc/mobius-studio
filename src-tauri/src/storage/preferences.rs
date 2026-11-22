@@ -43,6 +43,7 @@ pub enum StorageProvider {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
+    pub developer_mode: bool,
     pub performance: PerformanceMode,
     #[serde(default = "writer_default")]
     pub writer: Profile,
@@ -97,6 +98,7 @@ impl Store {
     pub fn settings_view(&self) -> Result<Value> {
         let p = self.preferences()?;
         Ok(json!({
+            "developerMode": p.developer_mode,
             "performance": p.performance,
             "writer": {"base":p.writer.base_url,"model":p.writer.model,"hasKey":self.vault.has(&p.writer,&p.writer.base_url)},
             "storage": p.storage,
@@ -109,6 +111,15 @@ impl Store {
         let mut p = self.preferences()?;
         p.performance = mode;
         save(&self.home.join("settings.json"), &p)
+    }
+
+    pub(crate) fn save_developer_mode(&self, enabled: bool) -> Result<()> {
+        let _guard = self.gate.lock().unwrap();
+        let mut p = self.preferences()?;
+        p.developer_mode = enabled;
+        save(&self.home.join("settings.json"), &p)?;
+        crate::developer::enable(enabled);
+        Ok(())
     }
 
     // Stage new credentials under a separate account until the settings file commits.

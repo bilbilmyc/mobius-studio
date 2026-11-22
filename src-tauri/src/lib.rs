@@ -1,6 +1,7 @@
 mod app;
 mod commands;
 mod connections;
+mod developer;
 mod domain;
 mod generation;
 mod library;

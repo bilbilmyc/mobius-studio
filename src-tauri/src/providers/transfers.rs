@@ -51,9 +51,8 @@ pub async fn upload(h: &Client, j: &Job, key: &str, a: &Asset, path: &Path) -> R
             }
         }
     }
-    let response = put
-        .body(reqwest::Body::wrap_stream(ReaderStream::new(f)))
-        .send()
+    let request = put.body(reqwest::Body::wrap_stream(ReaderStream::new(f)));
+    let response = crate::developer::send(request, key)
         .await
         .map_err(|e| Fault::known(e.without_url()))?;
     if !response.status().is_success() {
@@ -89,7 +88,9 @@ pub async fn download(h: &Client, j: &Job, raw: &str, key: &str) -> Reply<reqwes
         {
             req = auth(req, "bearer", key);
         }
-        let reply = req.send().await.map_err(Fault::transport)?;
+        let reply = crate::developer::send(req, key)
+            .await
+            .map_err(Fault::transport)?;
         if reply.status().is_redirection() {
             let loc = reply
                 .headers()

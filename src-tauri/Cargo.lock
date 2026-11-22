@@ -2570,7 +2570,7 @@ dependencies = [
 
 [[package]]
 name = "mobius-studio"
-version = "2.12.2"
+version = "2.13.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2579,6 +2579,7 @@ dependencies = [
  "futures-util",
  "http",
  "image",
+ "indexmap 2.14.2",
  "reqsign-aliyun-oss",
  "reqsign-core",
  "reqwest 0.12.28",

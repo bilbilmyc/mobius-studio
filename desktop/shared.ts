@@ -397,6 +397,7 @@ export interface StorageTarget {
   automatic: boolean
 }
 export interface Integrations {
+  developerMode: boolean
   performance: PerformanceMode
   writer: { base: string; model: string; hasKey: boolean }
   storage: StorageTarget
@@ -513,6 +514,11 @@ export function jobStatusGroup(status: string): JobStatusGroup {
 }
 
 export interface Bridge extends PromptAgentBridge {
+  setDeveloperMode: (enabled: boolean) => Promise<void>
+  requestHistory: () => Promise<import('./developer/model').RequestSummary[]>
+  requestExample: (id: number) => Promise<import('./developer/model').RequestExample | null>
+  clearRequestHistory: () => Promise<void>
+  copyRequestExample: (id: number, code: string) => Promise<void>
   optimizePrompt(input: PromptOptimization): Promise<PromptResult>
   createScript(story: Screenplay): Promise<Script>
   shotDrafts(): Promise<ShotDraft[]>

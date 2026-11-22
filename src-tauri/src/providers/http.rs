@@ -124,8 +124,13 @@ pub(crate) fn auth(r: RequestBuilder, scheme: &str, key: &str) -> RequestBuilder
         _ => r.bearer_auth(key),
     }
 }
-pub(crate) async fn json_response(request: RequestBuilder, key: &str) -> Reply<Value> {
-    let reply = request.send().await.map_err(Fault::transport)?;
+pub(crate) async fn json_response(
+    request: impl Into<crate::developer::Outgoing>,
+    key: &str,
+) -> Reply<Value> {
+    let reply = crate::developer::send(request, key)
+        .await
+        .map_err(Fault::transport)?;
     response_json(reply, key)
         .await?
         .ok_or_else(|| Fault::uncertain("服务返回的内容不是 JSON，请核对地址和协议。"))

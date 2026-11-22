@@ -4,8 +4,9 @@ import { ModelPicker, useModelCatalog } from './ModelPicker'
 import storageProviders from '../../src/StorageProviders.json'
 import { MediaToolSettings } from './MediaToolSettings'
 import { PerformanceSettings } from './PerformanceSettings'
+import { DeveloperSettings } from './RequestHistory'
 
-const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', performance: '性能', files: '文件与工具' }
+const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', performance: '性能', files: '文件与工具', developer: '开发者模式' }
 export type SettingsSection = keyof typeof sections
 
 interface Props {
@@ -45,7 +46,8 @@ export function Settings(props: Props) {
       {section === 'writer' && integrations && <WriterForm data={integrations.writer} reload={props.reload} />}
       {section === 'storage' && integrations && <StorageForm data={integrations} reload={props.reload} />}
       {section === 'performance' && integrations && <PerformanceSettings mode={integrations.performance} reload={props.reload} />}
-      {(section === 'writer' || section === 'storage' || section === 'performance') && !integrations &&
+      {section === 'developer' && integrations && <DeveloperSettings enabled={integrations.developerMode} reload={props.reload}/>}
+      {(section === 'writer' || section === 'storage' || section === 'performance' || section === 'developer') && !integrations &&
         <button onClick={() => void props.reload().catch(() => {})}>重新读取设置</button>}
       {section === 'files' && <><MediaToolSettings/>
         <div className="preference-row"><div><h3>本地作品</h3><p>查看已保存的原图、视频和导出副本。</p></div>
@@ -53,7 +55,7 @@ export function Settings(props: Props) {
         <div className="preference-row"><div><h3>网站工作台</h3><p>复制创作台的当前提示词，并打开官网。</p></div>
           <button onClick={props.website}>网站工作台 ↗</button></div>
       </>}
-      {section !== 'files' && section !== 'performance' && <p className="vault-note">{props.keyStorage}</p>}
+      {(section === 'media' || section === 'writer' || section === 'storage') && <p className="vault-note">{props.keyStorage}</p>}
     </div>
   </section>
 }

@@ -1,3 +1,4 @@
+use crate::developer::Form;
 use crate::{
     connections::catalog::Catalog,
     domain::{route, Job, Result},
@@ -5,7 +6,7 @@ use crate::{
     providers::inputs::Input,
     providers::{auth, json_response, protect_text, Fault, Output, Reply},
 };
-use reqwest::{multipart::Form, Client};
+use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -120,17 +121,17 @@ pub async fn submit(client: &Client, job: &Job, key: &str, inputs: &[Input]) -> 
         })
     };
     if let Some(image) = inputs.first() {
-        let form = Form::new()
-            .part("image", image.part().await?)
+        let form = image
+            .add_to_form(Form::new(key), "image")
+            .await?
             .text("type", "input")
             .text("subfolder", "mobius");
         let reply = json_response(
-            auth(
+            form.attach(auth(
                 client.post(route(&job.base_url, "upload/image")?),
                 "bearer",
                 key,
-            )
-            .multipart(form),
+            )),
             key,
         )
         .await?;
