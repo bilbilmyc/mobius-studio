@@ -87,7 +87,6 @@ export function WorkLibrary({
 
   return (
     <section className="library-page" aria-label="作品库">
-      {selected && <LibraryMarks key={selected.id} id={selected.id} mark={marks[selected.id] ?? unmarked} changed={m=>setMarks(old=>({...old,[selected.id]:m}))}/>}
       <div className="section-bar">
         <small>
           {filtered.length} 条{matching ? '匹配作品' : '本地任务'}
@@ -130,14 +129,6 @@ export function WorkLibrary({
         >
           批量导出
         </button>
-        {selected && (
-          <CloudSave
-            job={selected}
-            settings={settings}
-            configure={configureStorage}
-            report={report}
-          />
-        )}
       </div>
       <div className="page-body" ref={scroller}>
         <div className="gallery">
@@ -184,6 +175,13 @@ export function WorkLibrary({
         label="作品库分页"
         change={(page) => change({ page })}
       />
+      {selected && (
+        <div className="library-selection" role="group" aria-label="所选作品操作">
+          <LibraryMarks key={selected.id} id={selected.id} mark={marks[selected.id] ?? unmarked}
+            changed={mark => setMarks(old => ({ ...old, [selected.id]: mark }))} />
+          <CloudSave job={selected} settings={settings} configure={configureStorage} report={report} />
+        </div>
+      )}
       {batchOpen && (
         <BatchExport
           jobs={filtered}

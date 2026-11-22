@@ -501,7 +501,8 @@ async function run() {
   await page.waitForFunction(
     () => document.querySelector('.thumb img')?.naturalWidth === 1,
   )
-  await page.locator('.card').dblclick()
+  // Both clicks must land on the card even when the first click reveals selection tools.
+  await page.locator('.card').dblclick({ position: { x: 18, y: 12 }, delay: 60 })
   await page.waitForFunction(
     () => document.querySelector('img[alt="作品预览"]')?.naturalWidth === 1,
   )
