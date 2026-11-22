@@ -263,7 +263,7 @@ impl Studio {
             .await?
             .header(reqwest::header::CONTENT_LENGTH, len)
             .body(reqwest::Body::wrap_stream(ReaderStream::new(file)));
-        let response = crate::developer::send(request, "")
+        let response = crate::developer::send(request, "", crate::developer::Destination::Media)
             .await
             .map_err(|e| format!("对象存储连接失败：{}", e.without_url()))?;
         if !response.status().is_success() {

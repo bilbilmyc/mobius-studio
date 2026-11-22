@@ -109,7 +109,7 @@ async fn fetch_models(
     probing: bool,
 ) -> Reply<Option<Vec<String>>> {
     let request = auth(h.get(route(base, "models")?), scheme, key).timeout(Duration::from_secs(25));
-    let reply = crate::developer::send(request, key)
+    let reply = crate::developer::send(request, key, crate::developer::Destination::Api)
         .await
         .map_err(Fault::transport)?;
     if probing

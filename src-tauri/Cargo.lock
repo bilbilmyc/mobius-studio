@@ -2580,6 +2580,7 @@ dependencies = [
  "http",
  "image",
  "indexmap 2.14.2",
+ "percent-encoding",
  "reqsign-aliyun-oss",
  "reqsign-core",
  "reqwest 0.12.28",

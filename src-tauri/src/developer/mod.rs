@@ -114,14 +114,24 @@ impl Drop for Pending {
     }
 }
 
-pub(crate) async fn send(request: impl Into<Outgoing>, key: &str) -> reqwest::Result<Response> {
+#[derive(Clone, Copy)]
+pub(crate) enum Destination {
+    Api,
+    Media,
+}
+
+pub(crate) async fn send(
+    request: impl Into<Outgoing>,
+    key: &str,
+    destination: Destination,
+) -> reqwest::Result<Response> {
     let outgoing = request.into();
     let Some(epoch) = epoch() else {
         return outgoing.wire.send().await;
     };
     let (client, request) = outgoing.wire.build_split();
     let request = request?;
-    let (target, example) = Example::capture(&request, key, outgoing.form);
+    let (target, example) = Example::capture(&request, key, outgoing.form, destination);
     let id = LOG
         .lock()
         .unwrap()

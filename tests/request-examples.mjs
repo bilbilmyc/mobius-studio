@@ -36,8 +36,8 @@ export function exampleFixture(png) {
     if (url.pathname.endsWith('/upload/presign')) return json({code:0,data:{upload_url:url.origin + '/upload?sig=' + signature, path:'media/a.png'}})
     if (url.pathname === '/upload') { res.end('stored'); return }
     if (url.pathname.endsWith('/tasks/create')) return json({code:0,data:{task_id:'from-fixture'}})
-    if (url.pathname.endsWith('/tasks/from-fixture')) return json({code:0,data:{status:'completed',result_oss_url:url.origin+'/output.png?sig='+signature}})
-    if (url.pathname === '/output.png') { res.setHeader('content-type','image/png'); return res.end(png) }
+    if (url.pathname.endsWith('/tasks/from-fixture')) return json({code:0,data:{status:'completed',result_oss_url:url.origin+'/fixture-private-path/output.png'}})
+    if (url.pathname === '/fixture-private-path/output.png') { res.setHeader('content-type','image/png'); return res.end(png) }
     return json({data:[{b64_json:png.toString('base64')}]})
   }}
 }
@@ -87,7 +87,7 @@ export async function exerciseExamples({page, base, temp, png, templates, fixtur
   assert.equal(rows[0].status,403)
   const examples = await page.evaluate(async rows => Promise.all(rows.map(r=>window.studio.requestExample(r.id))),rows)
   const safe = JSON.stringify([rows,examples])
-  for (const secret of [key,'fixture-secret',signature,png.toString('base64')]) assert.ok(!safe.includes(secret))
+  for (const secret of [key,'fixture-secret',signature,'fixture-private-path',png.toString('base64')]) assert.ok(!safe.includes(secret))
   await button('请求记录').click()
   const dlg = history()
   await dlg.getByRole('navigation',{name:'已发送的请求'}).getByRole('button').first().waitFor()
@@ -97,7 +97,7 @@ export async function exerciseExamples({page, base, temp, png, templates, fixtur
   const paths = { 'Bash cURL':'example.sh', Python:'example.py', Go:'main.go' }
   const programs = { 'Bash cURL': process.env.MOBIUS_BASH || (process.platform==='win32' ? path.join(process.env.ProgramFiles,'Git','bin','bash.exe') : 'bash'), Python:process.env.MOBIUS_PYTHON || 'python', Go:'go' }
   const cases = ['GET /v1/models','POST /v1/chat/completions','POST /v1/images/generations',
-    'POST /v1/images/edits','POST /v1/dynamic','PUT /upload','GET /output.png']
+    'POST /v1/images/edits','POST /v1/dynamic','PUT /upload','GET /fixture-private-path/output.png']
   let runs = 0
   for (const which of cases) {
     const originalIndex = originals.findIndex(r => r.method + ' ' + r.url.split('?')[0] === which)

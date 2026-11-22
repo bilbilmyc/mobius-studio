@@ -1,4 +1,6 @@
 use super::json_body::{self, JsonPiece};
+use super::Destination;
+use percent_encoding::percent_decode_str;
 use reqwest::Request;
 use serde::Serialize;
 use serde_json::Value;
@@ -137,7 +139,12 @@ impl<'a> Scrubber<'a> {
         Argument::variable(&format!("{stem}_{}", self.next), format, prefix)
     }
     fn has_key(&self, text: &str) -> bool {
-        !self.key.is_empty() && text.contains(self.key)
+        !self.key.is_empty()
+            && (text.contains(self.key)
+                || (text.contains('%')
+                    && percent_decode_str(text)
+                        .decode_utf8_lossy()
+                        .contains(self.key)))
     }
     pub fn safe_name(&self, name: &str) -> bool {
         name.len() <= 512
@@ -145,10 +152,15 @@ impl<'a> Scrubber<'a> {
             && !self.has_key(name)
             && !name.contains("://")
     }
-    fn url(&self, url: &Url) -> (String, Argument) {
-        let display = format!("{}{}", url.origin().ascii_serialization(), url.path());
-        if self.has_key(url.as_str()) || private_url(url) || url.as_str().len() > 4096 {
-            let origin = url.origin().ascii_serialization();
+    fn url(&self, url: &Url, destination: Destination) -> (String, Argument) {
+        let origin = url.origin().ascii_serialization();
+        // A media link can grant access through its path alone, including on the same host as the API.
+        if matches!(destination, Destination::Media)
+            || url.as_str().len() > 4096
+            || private_url(url)
+            || self.has_key(url.as_str())
+            || url.query_pairs().any(|(_, value)| self.has_key(&value))
+        {
             let target = if self.has_key(&origin) {
                 "请求地址".into()
             } else {
@@ -156,7 +168,10 @@ impl<'a> Scrubber<'a> {
             };
             (target, Argument::variable("REQUEST_URL", "text", ""))
         } else {
-            (display, Argument::Literal(url.to_string()))
+            (
+                format!("{origin}{}", url.path()),
+                Argument::Literal(url.to_string()),
+            )
         }
     }
     pub fn text(&mut self, field: &str, value: &str) -> Argument {
@@ -193,6 +208,9 @@ impl<'a> Scrubber<'a> {
             return self.binding("VALUE", "text", "");
         }
         let lower = value.to_ascii_lowercase();
+        if Url::parse(value).is_ok_and(|url| matches!(url.scheme(), "http" | "https")) {
+            return self.binding("VALUE", "text", "");
+        }
         // Tool results and custom form values may wrap credentials or signed links in serialized text.
         let restricted = value
             .split([' ', '\n', '\r', '\t', '"', '\'', '<', '>'])
@@ -278,9 +296,10 @@ impl Example {
         request: &Request,
         key: &str,
         form: Option<Vec<Field>>,
+        destination: Destination,
     ) -> (String, Self) {
         let mut scrub = Scrubber::new(key);
-        let (target, url) = scrub.url(request.url());
+        let (target, url) = scrub.url(request.url(), destination);
         let body = if let Some(fields) = form {
             if serde_json::to_vec(&fields).is_ok_and(|s| s.len() <= RECORD_LIMIT) {
                 Body::Form { fields }

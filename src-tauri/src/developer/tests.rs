@@ -1,4 +1,4 @@
-use super::{capture::Example, Log, LIMIT};
+use super::{capture::Example, Destination, Log, LIMIT};
 use serde_json::{json, Value};
 
 #[test]
@@ -17,7 +17,7 @@ fn captured_examples_hide_credentials_and_preserve_request_fields() {
         }))
         .build()
         .unwrap();
-    let (target, model) = Example::capture(&request, key, None);
+    let (target, model) = Example::capture(&request, key, None, Destination::Api);
     let out = serde_json::to_value(model).unwrap();
     assert_eq!(target, "https://example.test/…");
     assert!(!out.to_string().contains("private-"));
@@ -39,13 +39,52 @@ fn captured_examples_hide_credentials_and_preserve_request_fields() {
 }
 
 #[test]
+fn examples_externalize_media_paths_and_encoded_credentials() {
+    let client = reqwest::Client::new();
+    for (url, key, destination) in [
+        (
+            "https://relay.test/private%20key/v1/models",
+            "private key",
+            Destination::Api,
+        ),
+        (
+            "https://relay.test/models?model=private+key",
+            "private key",
+            Destination::Api,
+        ),
+        (
+            "https://relay.test/shared/private-capability/image.png",
+            "",
+            Destination::Media,
+        ),
+    ] {
+        let req = client
+            .post(url)
+            .json(&json!({
+                "reference": "https://assets.test/private-capability/image.png",
+                "note": "include private%20key only from the environment"
+            }))
+            .build()
+            .unwrap();
+        let (target, example) = Example::capture(&req, key, None, destination);
+        let example = serde_json::to_value(example).unwrap();
+        assert_eq!(target, "https://relay.test/…");
+        assert_eq!(example["url"]["env"], "REQUEST_URL");
+        assert!(!example.to_string().contains("private-capability"));
+        if !key.is_empty() {
+            assert!(!example.to_string().contains("private%20key"));
+        }
+    }
+}
+
+#[test]
 fn cleared_or_evicted_requests_cannot_return_to_the_log() {
     let mut log = Log::default();
     let request = reqwest::Client::new()
         .get("https://example.test/models")
         .build()
         .unwrap();
-    let (target, model) = Example::capture(&request, "", None);
+    let (target, model) = Example::capture(&request, "", None, Destination::Api);
     let add = |log: &mut Log, epoch| log.begin(epoch, "GET".into(), target.clone(), model.clone());
     assert!(add(&mut log, 0).is_none());
     log.enabled = true;
@@ -70,7 +109,7 @@ fn examples_keep_wire_precision_and_cannot_expand_text_as_code() {
         )
         .build()
         .unwrap();
-    let (_, model) = Example::capture(&req, "", None);
+    let (_, model) = Example::capture(&req, "", None, Destination::Api);
     let model = serde_json::to_value(model).unwrap();
     let parts = model["body"]["pieces"].as_array().unwrap();
     assert_eq!(parts.len(), 1);
@@ -87,7 +126,7 @@ fn large_inline_images_use_file_inputs_without_losing_the_prompt() {
         .json(&json!({"prompt":"real prompt","images":[format!("data:image/webp;base64,{image}")]}))
         .build()
         .unwrap();
-    let (_, model) = Example::capture(&req, "", None);
+    let (_, model) = Example::capture(&req, "", None, Destination::Api);
     let model: Value = serde_json::to_value(model).unwrap();
     assert!(model.to_string().len() < 1024);
     assert!(model.to_string().contains("real prompt"));

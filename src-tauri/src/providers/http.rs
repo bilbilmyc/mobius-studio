@@ -128,7 +128,7 @@ pub(crate) async fn json_response(
     request: impl Into<crate::developer::Outgoing>,
     key: &str,
 ) -> Reply<Value> {
-    let reply = crate::developer::send(request, key)
+    let reply = crate::developer::send(request, key, crate::developer::Destination::Api)
         .await
         .map_err(Fault::transport)?;
     response_json(reply, key)
