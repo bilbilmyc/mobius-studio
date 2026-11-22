@@ -87,17 +87,36 @@ fn stitch(home: &Path, files: &[PathBuf], dest: &Path) -> Result<()> {
         let (w, h) = *canvas.get_or_insert((w.max(2) / 2 * 2, h.max(2) / 2 * 2));
         let has_audio = streams.iter().any(|v| v["codec_type"] == "audio");
         let name = format!("clip-{i}.mp4");
+        let picture = temp.path().join("picture.mp4");
+        let filter = format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30");
+        run(program(home, "ffmpeg")
+            .args(["-nostdin", "-v", "error", "-y", "-i"])
+            .arg(path)
+            .args([
+                "-map", "0:v:0", "-an", "-vf", &filter, "-c:v", "libx264", "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+            ])
+            .arg(&picture))?;
+        // Anchor both tracks to the actual encoded picture, including sources with no declared duration.
+        // An unbounded silent/padded track with -shortest can otherwise extend short clips on older FFmpeg.
+        let encoded = metadata(home, &picture)?;
+        let duration = encoded["streams"][0]["duration"]
+            .as_str()
+            .filter(|s| s.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0))
+            .ok_or("无法确定归一化画面的时长。")?;
         let mut cmd = program(home, "ffmpeg");
         cmd.current_dir(temp.path())
             .args(["-nostdin", "-v", "error", "-i"])
-            .arg(path);
-        if !has_audio {
+            .arg(&picture);
+        if has_audio {
+            cmd.arg("-i").arg(path);
+        } else {
             cmd.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
         }
-        cmd.args(["-map","0:v:0","-map",if has_audio{"0:a:0"}else{"1:a:0"},"-vf",
-            &format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30"),
-            "-af","apad","-shortest","-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-ar","48000","-ac","2",&name]);
-        run(&mut cmd)?;
+        run(cmd.args([
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", "apad", "-t", duration,
+            "-c:a", "aac", "-ar", "48000", "-ac", "2", &name,
+        ]))?;
         list.push_str(&format!("file '{name}'\n"));
     }
     fs::write(temp.path().join("clips.txt"), list).map_err(|e| e.to_string())?;

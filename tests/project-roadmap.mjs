@@ -492,10 +492,14 @@ export async function exerciseRoadmap({ page, data, temp, png, video, templates,
     assert.deepEqual(await readFile(path.join(dir, '001-视频.mp4')), video)
     const probe = spawnSync(
       'ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path.join(dir, '整片.mp4')],
+      ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,duration', '-of', 'json', path.join(dir, '整片.mp4')],
       { encoding: 'utf8' }
     )
-    assert.ok(Number(probe.stdout) > 2.8 && Number(probe.stdout) < 3.3, probe.stdout)
+    assert.equal(probe.status, 0, probe.stderr)
+    const tracks = JSON.parse(probe.stdout)
+    assert.deepEqual(tracks.streams.map(s => s.codec_type).sort(), ['audio', 'video'])
+    for (const { duration } of [tracks.format, ...tracks.streams])
+      assert.ok(Math.abs(Number(duration) - 3) < 0.1, 'Three one-second shots must produce three seconds of both picture and sound: ' + probe.stdout)
     const archive = await call('export_project', { id: script.id })
     const pre = await call('import_project', { path: archive, commit: false })
     assert.equal(pre.scenes[0], '海')
