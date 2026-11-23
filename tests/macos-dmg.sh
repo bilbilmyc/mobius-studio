@@ -19,6 +19,8 @@ ditto "$mounted/莫比环.app" "$app"
 hdiutil detach "$mounted"
 attached=false
 plist="$app/Contents/Info.plist"
+icon=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconFile' "$plist")
+cmp src-tauri/icons/icon.icns "$app/Contents/Resources/${icon%.icns}.icns"
 binary="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$plist")"
 [[ $(lipo -archs "$binary") == arm64 ]]
 [[ $(/usr/libexec/PlistBuddy -c 'Print LSMinimumSystemVersion' "$plist") == 13.0 ]]

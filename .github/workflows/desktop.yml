@@ -73,6 +73,8 @@ jobs:
             New-ItemProperty -LiteralPath $policy -Name $appName -PropertyType String -Value '--remote-debugging-address=127.0.0.1 --remote-debugging-port=0' -Force | Out-Null
             node tests/desktop-ui.mjs (Join-Path $dest $appName)
             if ($LASTEXITCODE) { throw "Desktop UI tests failed ($LASTEXITCODE)" }
+            node tests/desktop-ui.mjs (Join-Path $dest $appName) --library-menu-only
+            if ($LASTEXITCODE) { throw "Work library menu regression failed ($LASTEXITCODE)" }
           } finally {
             if ($null -eq $previous) { Remove-ItemProperty -LiteralPath $policy -Name $appName -ErrorAction SilentlyContinue }
             else { Set-ItemProperty -LiteralPath $policy -Name $appName -Value $previous }

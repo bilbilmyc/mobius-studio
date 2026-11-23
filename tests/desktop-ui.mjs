@@ -19,6 +19,7 @@ import { creationMock, exerciseCreation } from './creation-matrix.mjs'
 import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
 import { comfyFixture, exerciseComfy, seedGallery, exerciseGallery } from './studio-24.mjs'
 import { exerciseLibraryLayout } from './library-layout.mjs'
+import { exerciseImageMenu, exerciseVideoMenu } from './library-menu.mjs'
 import { backgroundFixture, exerciseBackgroundTasks } from './background-tasks.mjs'
 import { shotFixture, exerciseTwoShots } from './two-shot-workspace.mjs'
 import { exerciseOptimizer, optimizerFixture } from './prompt-optimizer.mjs'
@@ -358,6 +359,22 @@ async function run() {
   ])
   assert.equal(ff.status, 0, 'UI tests require FFmpeg on PATH')
   const video = await readFile(videoFile)
+  if (process.argv.includes('--library-menu-only')) {
+    const videoId = 'b'.repeat(32)
+    await writeFile(path.join(data, '作品', 'clip.mp4'), video)
+    await writeFile(path.join(data, 'tasks', videoId + '.json'), JSON.stringify({
+      Id: videoId, ProfileId: 'legacy', ProfileName: '旧版', ProtocolId: 'openai-video',
+      BaseUrl: 'https://relay.example/v1', Model: 'test-video', Prompt: '测试视频作品',
+      Status: 'done', FileName: 'clip.mp4', CreatedUtc: '/Date(1780000001000)/',
+    }))
+    await start()
+    await page.getByRole('button', { name: '作品库', exact: true }).click()
+    await exerciseImageMenu(page)
+    await exerciseVideoMenu(page, videoId)
+    assert.deepEqual(errors, [])
+    console.log('Image and video context menus passed with mouse, keyboard, transient focus loss, and the original work IDs.')
+    return
+  }
   await writeFile(path.join(temp, 'tone.wav'), Buffer.from('RIFF sample'))
   files = await listen((req, res) => {
     for (const h of ['authorization', 'x-auth-token', 'x-api-key'])

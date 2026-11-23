@@ -3,7 +3,7 @@ use crate::{
     domain::{self, kind, Result},
     media::export,
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
@@ -87,6 +87,7 @@ async fn export_selected(
                 .into_owned()
         };
         let dest = if choose_location {
+            let parent = app.get_webview_window("main").ok_or("找不到作品窗口。")?;
             let ext = std::path::Path::new(&name)
                 .extension()
                 .and_then(|s| s.to_str())
@@ -94,6 +95,7 @@ async fn export_selected(
             let Some(chosen) = app
                 .dialog()
                 .file()
+                .set_parent(&parent)
                 .set_title("另存作品")
                 .set_file_name(&name)
                 .add_filter("作品文件", &[ext])
