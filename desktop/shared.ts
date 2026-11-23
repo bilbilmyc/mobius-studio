@@ -291,6 +291,7 @@ export function suggestedServiceGroup(protocol: Protocol | 'chat-completions', b
 
 export interface Profile {
   Id: string
+  ServiceId?: string
   Name: string
   ServiceGroup?: ServiceGroup | 'auto'
   ProtocolId: Protocol
@@ -306,6 +307,16 @@ export type ProfileView = Omit<Profile, 'Keys' | 'Secrets'> & {
   hasKey: boolean
 }
 export const profileModels = (p: ProfileView) => [p.Model, ...(p.Models ?? [])]
+export function serviceRoutes(profiles: ProfileView[]) {
+  const services = new Map<string, ProfileView[]>()
+  for (const p of profiles) {
+    const id = p.ServiceId ?? p.Id
+    const routes = services.get(id)
+    if (routes) routes.push(p)
+    else services.set(id, [p])
+  }
+  return services
+}
 function groupServices<T>(profiles: T[], groupFor: (profile: T) => ServiceGroup) {
   const groups: Record<ServiceGroup, T[]> = { direct: [], relay: [], 'self-hosted': [] }
   for (const profile of profiles) groups[groupFor(profile)].push(profile)
@@ -315,6 +326,7 @@ export function groupProfiles(profiles: ProfileView[]) {
   return groupServices(profiles, p => !p.ServiceGroup || p.ServiceGroup === 'auto' ? suggestedServiceGroup(p.ProtocolId, p.BaseUrl) : p.ServiceGroup)
 }
 export interface EditProfile {
+  addTo?: string
   serviceGroup?: ServiceGroup | 'auto'
   models?: string[]
   sessionOnly?: boolean

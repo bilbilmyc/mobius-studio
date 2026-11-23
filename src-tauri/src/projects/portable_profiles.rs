@@ -13,6 +13,8 @@ use std::{
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Connection {
     id: String,
+    #[serde(default, rename = "serviceId", skip_serializing_if = "Option::is_none")]
+    service_id: Option<String>,
     name: String,
     #[serde(default, rename = "serviceGroup")]
     service_group: ServiceGroup,
@@ -39,6 +41,7 @@ pub(crate) fn describe(s: &Store, used: &HashSet<String>) -> Result<Vec<Connecti
                 })
                 .collect();
             Connection {
+                service_id: Some(p.service_id().to_owned()),
                 id: p.id,
                 name: p.name,
                 service_group: p.service_group,
@@ -60,6 +63,8 @@ pub(crate) fn plan(
     let current = s.profiles()?;
     let mut remap = HashMap::new();
     let mut additions = vec![];
+    // Imported routes share a fresh local identity. Archive IDs never select a vault account.
+    let mut imported_services = HashMap::new();
     for entry in profiles {
         let base = canonical_base(&entry.base)?;
         if site(&entry.protocol) && base == crate::domain::SITE {
@@ -88,8 +93,16 @@ pub(crate) fn plan(
             .unwrap_or_else(crate::domain::id);
         remap.insert(entry.id.clone(), id.clone());
         if existing.is_none() {
+            let service_id = entry.service_id.as_ref().map(|source| {
+                imported_services
+                    .entry((source.clone(), base.clone(), entry.name.clone()))
+                    .or_insert_with(crate::domain::id)
+                    .clone()
+            });
             additions.push(Connection {
                 id,
+                service_id,
+                base,
                 ..entry.clone()
             })
         }
@@ -122,6 +135,7 @@ pub(crate) fn install(s: &Store, stage: &Path) -> Result<()> {
         }
         all.push(Profile {
             id: c.id,
+            service_id: c.service_id,
             name: c.name,
             service_group: c.service_group,
             protocol_id: c.protocol,

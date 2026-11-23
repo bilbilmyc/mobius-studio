@@ -31,7 +31,7 @@ export function Settings(props: Props) {
     </nav>
     <div className={section === 'media' || section === 'writer' ? 'preferences-content media-preferences' : 'preferences-content'} key={section}>
       <h2>{sections[section]}</h2>
-      {section === 'media' && <MediaConnections profiles={props.profiles} official={official} edit={props.edit} remove={props.remove} />}
+      {section === 'media' && <MediaConnections profiles={props.profiles} official={official} edit={props.edit} remove={props.remove} addModel={props.addModel} />}
       {section === 'writer' && integrations && <WriterConnections data={integrations} reload={props.reload} editActive={props.editActiveWriter}
         selectWriter={props.selectWriter} switchingWriter={props.switchingWriter} />}
       {section === 'storage' && integrations && <StorageForm data={integrations} reload={props.reload} />}

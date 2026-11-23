@@ -18,6 +18,7 @@ import {
   isSite,
   mediaKind,
   profileModels,
+  serviceRoutes,
   presets,
   quote,
   siteBase,
@@ -140,6 +141,8 @@ function App() {
   const [editor, edit] = useState<{
       official: boolean
       profile?: ProfileView
+      addRoutes?: ProfileView[]
+      modelKind?: MediaKind
       jobKind?: MediaKind
     } | null>(null),
     [removing, remove] = useState<ProfileView | null>(null),
@@ -197,6 +200,8 @@ function App() {
   const modelFor = (p: ProfileView, editor = composer) =>
     profileModels(p).includes(editor.models[p.Id]) ? editor.models[p.Id] : p.Model
   const selectedModel = profile && modelFor(profile)
+  const mediaServices = serviceRoutes(externals.filter(p => mediaKind(p.ProtocolId) === kind))
+  const currentRoutes = profile ? mediaServices.get(profile.ServiceId ?? profile.Id) ?? [] : []
   const staleService = !!data && composer.service !== '@site' && !profile
   const staleModel = !!profile && !isSite(profile.ProtocolId) && !!composer.models[profile.Id]
     && !profileModels(profile).includes(composer.models[profile.Id])
@@ -703,7 +708,7 @@ function App() {
         : '已设为首帧，请确认视频参数。',
     )
   }
-  async function saved(savedId: string) {
+  async function saved(savedId: string, addedModel?: string) {
     const isOfficial = editor?.official
     const s = await refresh()
     if (!isOfficial && !editor?.jobKind) {
@@ -711,11 +716,12 @@ function App() {
       if (p) {
         const k = mediaKind(p.ProtocolId)
         setKind(k)
-        workspace.change(k, workspace.bindings[k], old => ({ ...old, service: p.Id, compare: '' }))
+        workspace.change(k, workspace.bindings[k], old => ({ ...old, service: p.Id, compare: '',
+          models: addedModel ? { ...old.models, [p.Id]: addedModel } : old.models }))
       }
     }
     edit(null)
-    say('连接已保存。')
+    say(addedModel ? '模型已添加。' : '连接已保存。')
   }
   const customPixels = !!controls?.customSize && !fixedRatio
   const listedSize = sizes.includes(draft.size)
@@ -946,7 +952,7 @@ function App() {
                 <div className="service-row">
                   <select
                     aria-label="生成服务"
-                    value={staleService ? composer.service : id}
+                    value={staleService ? composer.service : currentRoutes[0]?.Id ?? id}
                     onChange={(e) => {
                       const value = e.target.value
                       change(old => ({ ...old, service: value, compare: '' }))
@@ -957,7 +963,7 @@ function App() {
                       <option value="@site">AIGC 创作空间 · 官网</option>
                     </optgroup>
                     {staleService && <option value={composer.service} disabled>原服务已移除，请重新选择</option>}
-                    {groupProfiles(externals.filter(p => mediaKind(p.ProtocolId) === kind)).map(group =>
+                    {groupProfiles(Array.from(mediaServices.values(), routes => routes[0])).map(group =>
                       <optgroup key={group.id} label={group.name}>
                         {group.profiles.map(p => <option key={p.Id} value={p.Id}>{p.Name}</option>)}
                       </optgroup>)}
@@ -1010,6 +1016,18 @@ function App() {
                             {t.Name}
                           </option>
                         ))}
+                    </select>
+                  </label>
+                ) : profile && currentRoutes.length > 1 ? (
+                  <label>生成模型
+                    <select aria-label="生成模型" value={JSON.stringify([id, staleModel ? composer.models[id] : selectedModel])} onChange={e => {
+                      const [routeId, model] = JSON.parse(e.target.value) as [string, string]
+                      change(old => ({ ...old, service: routeId, compare: '', models: { ...old.models, [routeId]: model } }))
+                    }}>
+                      {staleModel && <option disabled value={JSON.stringify([id, composer.models[id]])}>原模型已移除，请重新选择</option>}
+                      {currentRoutes.map(route => <optgroup key={route.Id} label={presets[route.ProtocolId].title}>
+                        {profileModels(route).map(model => <option key={model} value={JSON.stringify([route.Id, model])}>{model}</option>)}
+                      </optgroup>)}
                     </select>
                   </label>
                 ) : profile && (profileModels(profile).length > 1 || staleModel) ? (
@@ -1374,6 +1392,7 @@ function App() {
           <Settings section={section} select={next => { setEditActiveWriter(false); setSection(next) }} integrations={integrations} reload={loadSettings}
             editActiveWriter={editActiveWriter} selectWriter={selectWriter} switchingWriter={switchingWriter}
             profiles={externals} official={official} edit={(official, profile) => edit({ official, profile })}
+            addModel={(addRoutes, modelKind) => edit({ official: false, addRoutes, modelKind })}
             remove={remove} keyStorage={data?.keyStorage ?? ''}
             folder={() => void attempt(() => window.studio.folder())}
             website={() => void attempt(async () => {
@@ -1414,7 +1433,8 @@ function App() {
       {editor && (
         <ConnectionEditor
           {...editor}
-          kind={editor.jobKind ?? kind}
+          linked={!!editor.profile && externals.some(p => p.Id !== editor.profile!.Id && p.ServiceId && p.ServiceId === editor.profile!.ServiceId)}
+            kind={editor.modelKind ?? editor.jobKind ?? kind}
           storage={data?.keyStorage ?? ''}
           close={() => edit(null)}
           saved={saved}
@@ -1422,7 +1442,7 @@ function App() {
       )}
       {removing && (
         <Modal title="移除模型服务" close={() => remove(null)}>
-          <p>移除「{removing.Name}」的连接？作品仍可在作品库打开。</p>
+          <p>移除「{removing.Name}」的「{presets[removing.ProtocolId]?.title}」及其模型？作品仍可在作品库打开。</p>
           <footer className="modal-actions">
             <button onClick={() => remove(null)}>取消</button>
             <button

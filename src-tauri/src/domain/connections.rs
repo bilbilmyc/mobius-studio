@@ -221,6 +221,8 @@ pub enum ServiceGroup {
 #[serde(default, rename_all = "PascalCase")]
 pub struct Profile {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_id: Option<String>,
     pub name: String,
     pub service_group: ServiceGroup,
     pub protocol_id: String,
@@ -234,10 +236,16 @@ pub struct Profile {
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
+impl Profile {
+    pub fn service_id(&self) -> &str {
+        self.service_id.as_deref().unwrap_or(&self.id)
+    }
+}
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edit {
     pub id: Option<String>,
+    pub add_to: Option<String>,
     pub name: String,
     pub service_group: Option<ServiceGroup>,
     pub protocol: String,

@@ -1,6 +1,6 @@
 [package]
 name = "mobius-studio"
-version = "2.14.0"
+version = "2.14.1"
 edition = "2021"
 description = "莫比环本地图片与视频工作台"
 build = "build.rs"

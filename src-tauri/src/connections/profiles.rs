@@ -43,9 +43,9 @@ impl Store {
         Ok(p)
     }
     pub fn profile_view(&self, p: &Profile) -> Value {
-        json!({"Id":p.id,"Name":p.name,"ServiceGroup":p.service_group,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
+        json!({"Id":p.id,"ServiceId":p.service_id(),"Name":p.name,"ServiceGroup":p.service_group,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
     }
-    pub fn edit(&self, e: Edit) -> Result<String> {
+    pub fn edit(&self, mut e: Edit) -> Result<String> {
         let _lock = self.gate.lock().unwrap();
         let mut profiles = self.profiles()?;
         let official = e.id.as_deref() == Some("@site");
@@ -57,6 +57,44 @@ impl Store {
         };
         if !site(proto) && crate::generation::creation::preset(proto).is_null() {
             return Err("未知接口协议。".into());
+        }
+        let mut new_route = None;
+        if let Some(source_id) = &e.add_to {
+            let source = profiles
+                .iter()
+                .find(|p| &p.id == source_id)
+                .ok_or("原服务已移除。")?;
+            if e.id.is_some()
+                || source.base_url != base
+                || e.model.trim().is_empty()
+                || site(&source.protocol_id)
+                || site(proto)
+                || proto == "comfy-image"
+                || source.protocol_id == "comfy-image"
+            {
+                return Err("请在原服务地址下添加图片或视频模型。".into());
+            }
+            let service_id = source.service_id().to_owned();
+            e.name.clone_from(&source.name);
+            e.service_group = Some(source.service_group);
+            new_route = Some(Profile {
+                id: id(),
+                service_id: Some(service_id.clone()),
+                keys: source.keys.clone(),
+                ..Default::default()
+            });
+            if let Some(route) = profiles
+                .iter_mut()
+                .find(|p| p.service_id() == service_id && p.protocol_id == proto)
+            {
+                let model = e.model.trim();
+                let saved = route.id.clone();
+                if model != route.model && !route.models.iter().any(|m| m == model) {
+                    route.models.push(model.to_owned());
+                    save(&self.home.join("connections.json"), &profiles)?;
+                }
+                return Ok(saved);
+            }
         }
         if let Some(c) = &e.controls {
             crate::generation::creation::validate_controls(c)?;
@@ -79,10 +117,13 @@ impl Store {
         if !official && e.id.is_some() && pos.is_none() {
             return Err("连接不存在。".into());
         }
-        let mut p = pos.map(|i| profiles[i].clone()).unwrap_or_else(|| Profile {
-            id: id(),
-            ..Default::default()
-        });
+        let adding = new_route.is_some();
+        let mut p = new_route
+            .or_else(|| pos.map(|i| profiles[i].clone()))
+            .unwrap_or_else(|| Profile {
+                id: id(),
+                ..Default::default()
+            });
         if official {
             p.extra.insert("DefaultOfficial".into(), Value::Bool(true));
         } else if let Some(group) = e.service_group {
@@ -115,10 +156,27 @@ impl Store {
                 .collect();
         }
         p.controls = if official { None } else { e.controls };
-        if e.session_only {
+        let siblings = profiles
+            .iter_mut()
+            .filter(|other| other.id != p.id && other.service_id() == p.service_id())
+            .collect::<Vec<_>>();
+        if !siblings.is_empty()
+            && (site(proto)
+                || proto == "comfy-image"
+                || siblings.iter().any(|other| other.protocol_id == proto))
+        {
+            return Err("此服务已有相同协议，或所选协议需要独立连接。".into());
+        }
+        if !adding && e.session_only {
             self.vault.temporary(&p, &e.key);
-        } else {
+        } else if !adding {
             self.vault.put(&mut p, &e.key)?;
+        }
+        for sibling in siblings {
+            sibling.name.clone_from(&p.name);
+            sibling.base_url.clone_from(&p.base_url);
+            sibling.service_group = p.service_group;
+            sibling.keys.clone_from(&p.keys);
         }
         let saved = p.id.clone();
         if let Some(i) = pos {
@@ -144,7 +202,9 @@ impl Store {
         let i = all.iter().position(|p| p.id == id).ok_or("找不到连接")?;
         let removed = all.remove(i);
         save(&self.home.join("connections.json"), &all)?;
-        self.vault.forget(&removed);
+        if !all.iter().any(|p| p.service_id() == removed.service_id()) {
+            self.vault.forget(&removed);
+        }
         Ok(())
     }
     pub fn key(&self, j: &Job) -> Result<String> {

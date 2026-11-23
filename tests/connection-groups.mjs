@@ -7,7 +7,7 @@ export const legacyRelay = {
   Relay: { auth: 'bearer', submit: 'images/generations', body: '{}', url: 'data.0.url', sizes: ['1024x1024'] },
 }
 
-export async function exerciseConnectionGroups({ page, restart, shot }) {
+export async function exerciseConnectionGroups({ page, restart, shot, base }) {
   const button = name => page.getByRole('button', { name, exact: true })
   const region = name => page.getByRole('region', { name, exact: true })
   const dialog = () => page.getByRole('dialog')
@@ -22,6 +22,8 @@ export async function exerciseConnectionGroups({ page, restart, shot }) {
   assert.deepEqual(await legacy().getByRole('list', { name: '图片模型' }).locator('code').allTextContents(),
     [legacyRelay.Model, ...legacyRelay.Models])
   assert.equal(await region('内置官网').getByRole('article').count(), 0)
+  assert.equal(await legacy().getByRole('button', { name: '添加视频模型', exact: true }).count(), 1,
+    'An existing image relay must let the user add a video model on its own card')
 
   await button('添加模型服务').click()
   await dialog().getByLabel('连接名称').fill('图片直连')
@@ -73,9 +75,67 @@ export async function exerciseConnectionGroups({ page, restart, shot }) {
     assert.ok(await region('我的模型服务').evaluate(el => el.scrollWidth <= el.clientWidth + 1), `connections overflow at ${width}px`)
   }
   await page.setViewportSize(viewport)
+  await legacy().getByRole('button', { name: '添加视频模型' }).click()
+  assert.equal(await dialog().getByLabel('接口协议').inputValue(), 'relay-video')
+  await dialog().getByRole('button', { name: '取消' }).click()
+  await button(`编辑 ${legacyRelay.Name}`).click()
+  await dialog().getByLabel('服务根地址').fill(base)
+  await dialog().getByLabel('服务分组').selectOption('relay')
+  await dialog().getByLabel('API Key').fill('local-relay-test')
+  await dialog().getByLabel('请求体 JSON', {exact: false}).first().fill('{"model":"{{model}}","prompt":"{{prompt}}"}')
+  await save()
+  const quickAdd = async () => {
+    await dialog().getByRole('button', {name: '添加模型', exact: true}).click()
+    await dialog().waitFor({state: 'hidden'})
+  }
+  await legacy().getByRole('button', { name: '添加视频模型' }).click()
+  assert.equal(await dialog().getByLabel('API Key').count(), 0)
+  await dialog().getByLabel('接口协议').selectOption('openai-video')
+  await dialog().getByRole('button', {name: '获取模型列表'}).click()
+  await dialog().getByLabel('从服务商选择模型').selectOption('relay-movie')
+  await quickAdd()
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await legacy().getByRole('button', {name: '添加视频模型'}).click()
+    assert.equal(await dialog().getByLabel('接口协议').inputValue(), 'openai-video')
+    await dialog().getByLabel('模型 ID', {exact: true}).fill('relay-movie-alt')
+    await quickAdd()
+  }
+  assert.deepEqual(await legacy().getByRole('list', {name:'视频模型'}).locator('code').allTextContents(),
+    ['relay-movie', 'relay-movie-alt'])
+  await legacy().getByRole('button', {name:'添加视频模型'}).click()
+  await dialog().getByLabel('接口协议').selectOption('wan-video')
+  await dialog().getByLabel('模型 ID', {exact:true}).fill('wan-movie')
+  await quickAdd()
+  assert.equal(await relays().getByRole('article').count(), 1)
+  page = await restart()
+  for (const [tab, model] of [['视频', 'relay-movie-alt'], ['图片', legacyRelay.Model]]) {
+    await button(tab).click()
+    await page.getByLabel('生成服务', {exact:true}).selectOption({label:legacyRelay.Name})
+    const picker = page.getByLabel('生成模型', {exact:true})
+    if (tab === '视频') {
+      assert.equal(await page.getByLabel('生成服务', {exact:true}).getByRole('option', {name:legacyRelay.Name, exact:true}).count(), 1)
+      assert.equal(await picker.locator('optgroup').count(), 2)
+    }
+    await picker.selectOption({label:model})
+    await page.locator('#prompt').fill(model)
+    await button('生成' + tab).click()
+    await page.waitForFunction(async name => (await window.studio.state()).jobs.some(j => j.model === name && j.status === 'done'), model)
+  }
+  await button('设置').click()
+  await legacy().getByRole('button', {name:'移除 OpenAI 兼容视频'}).click()
+  await button('移除连接').click()
+  await dialog().waitFor({state:'hidden', timeout:5000}).catch(async error => {
+    const state = await page.evaluate(() => window.studio.state())
+    throw new Error('Remove failed: ' + await page.locator('footer.status').innerText() +
+      ' ' + JSON.stringify(state.jobs.map(({model, status}) => ({model, status}))), {cause:error})
+  })
+  await legacy().getByRole('button', {name:'移除 万相 · 文生视频'}).click()
+  await button('移除连接').click()
+  assert.deepEqual(await legacy().getByRole('list', {name:'图片模型'}).locator('code').allTextContents(),
+    [legacyRelay.Model, ...legacyRelay.Models])
   await legacy().getByRole('button', { name: `移除 ${legacyRelay.Name}` }).click()
   await button('移除连接').click()
   await region('我的模型服务').getByText(/还没有添加服务/).waitFor()
   assert.equal(await region('内置官网').getByText('Key 已配置').count(), 1)
-  console.log('Connection groups passed: legacy nesting, per-service models, automatic and manual grouping, restart, removal and responsive layout.')
+  console.log('Connection groups passed: legacy profiles, linked image and video protocols, shared-key catalog, generation after restart, removal and responsive layout.')
 }

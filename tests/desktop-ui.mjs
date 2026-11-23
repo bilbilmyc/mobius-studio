@@ -161,7 +161,7 @@ async function start() {
   }
   assert.ok(page, 'WebView target did not navigate')
   page.on('pageerror', (e) => errors.push(e.message))
-  await page.getByRole('button', { name: '连接官网 Key' }).waitFor()
+  await page.getByLabel('生成服务', { exact: true }).waitFor()
   await page.waitForFunction(
     () => document.querySelector('.canvas img')?.naturalWidth > 0,
   )
@@ -252,9 +252,29 @@ async function run() {
     return
   }
   if (process.argv.includes('--connection-groups-only')) {
+    const videoFile = path.join(temp, 'relay-output.mp4')
+    const sample = spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=96x64:d=1',
+      '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-threads', '1', videoFile])
+    assert.equal(sample.status, 0, 'Fixture video requires FFmpeg')
+    const video = await readFile(videoFile)
+    relay = await listen((req, res, bytes) => {
+      assert.equal(req.headers.authorization, 'Bearer local-relay-test')
+      if (req.url === '/v1/models') return json(res, {data: [{id: 'relay-movie'}]})
+      if (req.url === '/v1/videos' && req.method === 'POST') {
+        assert.match(bytes.toString(), /name="model"\r\n\r\nrelay-movie-alt\r\n/)
+        return json(res, {id: 'clip'})
+      }
+      if (req.url === '/v1/videos/clip') return json(res, {status: 'completed'})
+      if (req.url === '/v1/videos/clip/content') return res.end(video)
+      if (req.url === '/v1/images/generations' && req.method === 'POST') {
+        assert.equal(JSON.parse(bytes).model, legacyRelay.Model)
+        return json(res, {data: [{b64_json: png.toString('base64')}]})
+      }
+      assert.fail('Unexpected fixture request')
+    })
     await writeFile(path.join(data, 'connections.json'), JSON.stringify([legacyRelay]))
     await start()
-    await exerciseConnectionGroups({ page, restart: restartNormally, shot })
+    await exerciseConnectionGroups({ page, restart: restartNormally, shot, base: origin(relay) + '/v1' })
     assert.deepEqual(errors, [])
     return
   }

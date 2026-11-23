@@ -11,6 +11,7 @@ use std::sync::Arc;
 fn profile(base: &str, protocol: &str) -> Edit {
     Edit {
         id: None,
+        add_to: None,
         name: "本机测试".into(),
         service_group: None,
         protocol: protocol.into(),
@@ -235,6 +236,51 @@ fn session_key_stays_in_memory_and_is_scoped_to_one_connection() {
     let s = Store::new(tmp.path().to_owned()).unwrap();
     let p = s.resolve(&id, "image").unwrap();
     assert!(!s.vault.has(&p, &p.base_url));
+}
+
+#[test]
+fn linked_media_routes_share_only_their_own_service_credentials() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::new(tmp.path().to_owned()).unwrap();
+    let base = "https://relay.example/v1";
+    let mut image = profile(base, "openai-image");
+    image.session_only = true;
+    image.key = "session-one".into();
+    let image_id = store.edit(image).unwrap();
+    let unrelated = store.edit(profile(base, "openai-image")).unwrap();
+    let add = |base, model: &str| {
+        let mut video = profile(base, "openai-video");
+        video.add_to = Some(image_id.clone());
+        video.model = model.into();
+        store.edit(video)
+    };
+    assert!(add("https://other.example/v1", "invalid").is_err());
+    let video_id = add(base, "movie").unwrap();
+    assert_eq!(video_id, add(base, "second").unwrap());
+    assert_eq!(video_id, add(base, "second").unwrap());
+    let video = store.resolve(&video_id, "video").unwrap();
+    assert_eq!(video.models, ["second"]);
+    assert!(video.keys.is_empty());
+    assert_eq!(store.vault.get(&video, base).unwrap(), "session-one");
+    let mut rotate = profile(base, "openai-video");
+    rotate.id = Some(video_id.clone());
+    rotate.model = "movie".into();
+    rotate.key = "session-two".into();
+    rotate.session_only = true;
+    store.edit(rotate).unwrap();
+    let image = store.resolve(&image_id, "image").unwrap();
+    assert_eq!(store.vault.get(&image, base).unwrap(), "session-two");
+    assert!(!store
+        .vault
+        .has(&store.resolve(&unrelated, "image").unwrap(), base));
+    store.remove(&image_id).unwrap();
+    assert_eq!(store.vault.get(&video, base).unwrap(), "session-two");
+    let reopened = Store::new(tmp.path().to_owned()).unwrap();
+    assert!(!reopened
+        .vault
+        .has(&reopened.resolve(&video_id, "video").unwrap(), base));
+    store.remove(&video_id).unwrap();
+    assert!(!store.vault.has(&video, base));
 }
 
 #[test]

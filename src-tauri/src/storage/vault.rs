@@ -26,7 +26,7 @@ impl Vault {
         self.session
             .lock()
             .unwrap()
-            .contains_key(&(p.id.clone(), base.into()))
+            .contains_key(&(p.service_id().into(), base.into()))
             || p.keys.contains_key(&slot(base))
     }
     pub fn temporary(&self, p: &Profile, key: &str) {
@@ -34,7 +34,7 @@ impl Vault {
             self.session
                 .lock()
                 .unwrap()
-                .insert((p.id.clone(), p.base_url.clone()), key.trim().into());
+                .insert((p.service_id().into(), p.base_url.clone()), key.trim().into());
         }
     }
     pub fn put(&self, p: &mut Profile, key: &str) -> Result<()> {
@@ -46,7 +46,7 @@ impl Vault {
         self.session
             .lock()
             .unwrap()
-            .remove(&(p.id.clone(), base.clone()));
+            .remove(&(p.service_id().into(), base.clone()));
         #[cfg(windows)]
         {
             p.keys.insert(
@@ -56,7 +56,7 @@ impl Vault {
         }
         #[cfg(target_os = "macos")]
         {
-            let account = format!("{}@{}", p.id, base);
+            let account = format!("{}@{}", p.service_id(), base);
             security_framework::passwords::set_generic_password(
                 "com.mobius.creative.studio",
                 &account,
@@ -67,7 +67,7 @@ impl Vault {
         }
         #[cfg(target_os = "linux")]
         {
-            let account = format!("{}@{}", p.id, base);
+            let account = format!("{}@{}", p.service_id(), base);
             if secret(
                 &[
                     "store",
@@ -85,12 +85,12 @@ impl Vault {
                 self.session
                     .lock()
                     .unwrap()
-                    .remove(&(p.id.clone(), base.clone()));
+                    .remove(&(p.service_id().into(), base.clone()));
             } else {
                 self.session
                     .lock()
                     .unwrap()
-                    .insert((p.id.clone(), base.clone()), key.trim().into());
+                    .insert((p.service_id().into(), base.clone()), key.trim().into());
             }
         }
         Ok(())
@@ -100,7 +100,7 @@ impl Vault {
             .session
             .lock()
             .unwrap()
-            .get(&(p.id.clone(), base.into()))
+            .get(&(p.service_id().into(), base.into()))
         {
             return Ok(value.clone());
         }
@@ -142,7 +142,7 @@ impl Vault {
         self.session
             .lock()
             .unwrap()
-            .retain(|(id, _), _| id != &p.id);
+            .retain(|(id, _), _| id != p.service_id());
         #[cfg(target_os = "macos")]
         for (k, v) in &p.keys {
             if k.starts_with("macos:") {

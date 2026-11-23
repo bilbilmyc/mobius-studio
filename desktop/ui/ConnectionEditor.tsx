@@ -27,6 +27,8 @@ import {
 
 export function ConnectionEditor({
   profile,
+  addRoutes,
+  linked,
   official,
   kind,
   storage,
@@ -34,33 +36,44 @@ export function ConnectionEditor({
   saved,
 }: {
   profile?: ProfileView
+  addRoutes?: ProfileView[]
+  linked?: boolean
   official: boolean
   kind: 'image' | 'video'
   storage: string
   close: () => void
-  saved: (id: string) => Promise<void>
+  saved: (id: string, addedModel?: string) => Promise<void>
 }) {
+  const source = addRoutes?.[0]
+  const mediaLabel = kind === 'image' ? '图片模型' : '视频模型'
+  const matching = addRoutes?.find(route => mediaKind(route.ProtocolId) === kind)
+  const defaultProtocol = matching?.ProtocolId ?? (source?.ProtocolId.startsWith('wan-') ? `wan-${kind}` :
+    source && isCustom(source.ProtocolId) ? `relay-${kind}` : `openai-${kind}`)
+  const relayDefaults = (protocol: Protocol) => ({
+    ...defaultRelay(mediaKind(protocol)), auth: source?.Relay?.auth ?? 'bearer' as const,
+  })
   const [p, set] = useState<EditProfile>(() => ({
     id: official ? '@site' : profile?.Id,
-    name: official ? 'AIGC 创作空间' : (profile?.Name ?? ''),
+    addTo: source?.Id,
+    name: official ? 'AIGC 创作空间' : (profile?.Name ?? source?.Name ?? ''),
     serviceGroup: official ? undefined : profile?.ServiceGroup ?? 'auto',
     protocol: official
       ? 'rh-image'
-      : (profile?.ProtocolId ??
-        (kind === 'image' ? 'openai-image' : 'openai-video')),
-    base: official ? siteBase : (profile?.BaseUrl ?? ''),
+      : (profile?.ProtocolId ?? defaultProtocol),
+    base: official ? siteBase : (profile?.BaseUrl ?? source?.BaseUrl ?? ''),
     model: official ? defaultTemplate('image').Key : (profile?.Model ?? ''),
     key: '',
     relay: profile?.Relay,
   }))
   const [relay, setRelay] = useState<RelayMap>(
-      () => profile?.Relay ?? defaultRelay(kind),
+      () => profile?.Relay ?? relayDefaults(p.protocol),
     ),
     [err, error] = useState(''),
     [busy, work] = useState(false)
+  const existing = addRoutes?.find(route => route.ProtocolId === p.protocol)
   const catalog = useModelCatalog({
-    source: p.protocol === 'comfy-image' ? 'comfy' : 'connection', id: p.id, base: p.base, key: p.key,
-    auth: isCustom(p.protocol) ? relay.auth : 'bearer',
+    source: p.protocol === 'comfy-image' ? 'comfy' : 'connection', id: existing?.Id ?? source?.Id ?? p.id, base: p.base, key: p.key,
+    auth: isCustom(p.protocol) ? existing?.Relay?.auth ?? relay.auth : 'bearer',
   })
   const models = catalog.models ?? []
   const [additional, setAdditional] = useState(profile?.Models?.join('\n') ?? '')
@@ -74,12 +87,12 @@ export function ConnectionEditor({
     set((old) => ({
       ...old,
       protocol: id,
-      base: presets[id].base || old.base,
-      model: presets[id].model,
+      base: source || linked ? old.base : presets[id].base || old.base,
+      model: source ? '' : presets[id].model,
       name: old.name || (id === 'comfy-image' ? '本机 ComfyUI' : ''),
       key: '',
     }))
-    setRelay(defaultRelay(mediaKind(id)))
+    setRelay(relayDefaults(id))
     setControls(emptyControls())
     setAdditional('')
     error('')
@@ -90,12 +103,12 @@ export function ConnectionEditor({
     try {
       const input = {
         ...p,
-        base: official || p.protocol === 'comfy-image' ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
+        base: source || official || p.protocol === 'comfy-image' ? p.base : catalog.baseForSave(profile?.BaseUrl, p.protocol.startsWith('openai-')),
         models: official ? undefined : parseModelIds(additional),
         controls: official ? undefined : controls,
         relay: isCustom(p.protocol) ? relay : undefined,
       }
-      await saved(await window.studio.save(input))
+      await saved(await window.studio.save(input), source ? p.model.trim() : undefined)
     } catch (e) {
       error(e instanceof Error ? e.message : String(e))
     } finally {
@@ -112,10 +125,17 @@ export function ConnectionEditor({
       />
     </label>
   )
+  const protocolSelect = <label>接口协议
+    <select value={p.protocol} onChange={e => select(e.target.value as Protocol)}>
+      {(Object.keys(presets) as Protocol[]).filter(id => (!isSite(id) || id === profile?.ProtocolId)
+        && (!(source || linked) || id !== 'comfy-image') && (!source || mediaKind(id) === kind))
+        .map(id => <option key={id} value={id}>{presets[id].title}</option>)}
+    </select>
+  </label>
   return (
     <Modal
       title={
-        official ? '官网连接' : profile ? '编辑模型服务' : '添加模型服务'
+        source ? `添加${mediaLabel}` : official ? '官网连接' : profile ? '编辑模型服务' : '添加模型服务'
       }
       close={close}
     >
@@ -126,7 +146,11 @@ export function ConnectionEditor({
         }}
       >
         <div className="dialog-body fields">
-          <fieldset className="connection-fields">
+          {source ? <fieldset className="connection-fields">
+            <legend>{source.Name}</legend>
+            <small>{source.BaseUrl}{source.hasKey && ' · 沿用此服务的 Key'}</small>
+            {protocolSelect}
+          </fieldset> : <fieldset className="connection-fields">
             <legend>{official ? '内置官网' : '服务连接'}</legend>
             {official ? <>
               <strong>AIGC 创作空间</strong>
@@ -142,12 +166,7 @@ export function ConnectionEditor({
                 <label>连接名称
                   <input required value={p.name} placeholder="例如：我的模型中转站" onChange={e => patch('name', e.target.value)} />
                 </label>
-                <label>接口协议
-                  <select value={p.protocol} onChange={e => select(e.target.value as Protocol)}>
-                    {(Object.keys(presets) as Protocol[]).filter(id => !isSite(id) || id === profile?.ProtocolId)
-                      .map(id => <option key={id} value={id}>{presets[id].title}</option>)}
-                  </select>
-                </label>
+                {protocolSelect}
               </div>
               <label>服务根地址
                 <input required type="url" value={p.base}
@@ -169,16 +188,17 @@ export function ConnectionEditor({
               新填的 Key 仅在本次打开期间使用
             </label>
             <small>{storage}</small>
-          </fieldset>
+            {linked && <small>此服务的各接口共用名称、分组、根地址和 Key。</small>}
+          </fieldset>}
           {!official && <fieldset className="connection-fields">
             <legend>此服务的模型</legend>
             <ModelPicker label="模型 ID" value={p.model} change={value => patch('model', value)}
               catalog={catalog} canFetch={!!p.base.trim()} disabled={busy} />
-            <AdditionalModels text={additional} change={setAdditional} primary={p.model} catalog={models}
-              hint="每行一个，与上面的模型共用接口协议和输出参数" />
-            <ControlSettings key={p.protocol} protocol={p.protocol} controls={controls} change={setControls} />
+            {!source && <AdditionalModels text={additional} change={setAdditional} primary={p.model} catalog={models}
+              hint="每行一个，与上面的模型共用接口协议和输出参数" />}
+            {!existing && <ControlSettings key={p.protocol} protocol={p.protocol} controls={controls} change={setControls} />}
           </fieldset>}
-          {isCustom(p.protocol) && (
+          {isCustom(p.protocol) && !existing && (
             <fieldset>
               <legend>接口映射</legend>
               <p className="help">
@@ -280,7 +300,7 @@ export function ConnectionEditor({
               )}
             </fieldset>
           )}
-          {isCustom(p.protocol) && (
+          {isCustom(p.protocol) && !existing && (
             <>
               <WorkflowSettings
                 protocol={p.protocol}
@@ -297,7 +317,7 @@ export function ConnectionEditor({
             取消
           </button>
           <button className="primary" disabled={busy || catalog.loading}>
-            {busy ? '处理中…' : '保存连接'}
+            {busy ? '处理中…' : source ? '添加模型' : '保存连接'}
           </button>
         </footer>
       </form>

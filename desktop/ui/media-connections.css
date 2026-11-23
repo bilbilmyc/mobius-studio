@@ -97,8 +97,8 @@
 .saved-connection-info code { color: var(--dim); font-size: 12px; }
 .connection-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .connection-actions button { padding: 4px 9px; font-size: 13px; }
-.connection-actions button:last-child { background: transparent; border-color: transparent; color: var(--dim); }
-.connection-actions button:last-child:hover { background: #33262c; color: #ffb1b8; }
+.connection-actions button[aria-label^="移除"] { background: transparent; border-color: transparent; color: var(--dim); }
+.connection-actions button[aria-label^="移除"]:hover { background: #33262c; color: #ffb1b8; }
 .connection-models {
   margin-top: 10px;
   padding-top: 10px;
