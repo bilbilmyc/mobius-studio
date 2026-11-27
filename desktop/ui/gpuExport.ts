@@ -197,7 +197,7 @@ export async function sizedExport(
     throw Error('单张导出须为有效像素尺寸，最多 5000 万像素。')
   }
   let fallback = ''
-  if (mode === 'performance') {
+  if (mode === 'performance' && resize.format !== 'gif') {
     const render = gpuIdle.then(() => gpuPng(id, resize))
     gpuIdle = render.then(
       () => {},

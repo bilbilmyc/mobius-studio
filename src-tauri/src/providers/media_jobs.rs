@@ -136,6 +136,13 @@ pub async fn submit(
         if let Some(q) = quality {
             payload["quality"] = json!(q);
         }
+        if j.settings.get("output_format").is_some_and(|v| v == "gif") {
+            for key in ["output_format", "frame_count", "frame_duration_ms"] {
+                if let Some(value) = j.settings.get(key) {
+                    payload[key] = value.clone();
+                }
+            }
+        }
         let (path, req) = if inputs.is_empty() {
             ("images/generations", None)
         } else if inputs.iter().any(|a| a.is_link()) {

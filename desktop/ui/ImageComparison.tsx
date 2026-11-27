@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import {
-  defaultConfig, isSite, mediaKind, officialModes, presets, profileModels, profileSizes, quote, relaySlots,
+  defaultConfig, gifParameters, isSite, mediaKind, officialModes, presets, profileModels, profileSizes, relaySlots,
   siteTemplate, statusLabels, templates, type Comparison, type JobView, type Picked,
   type ProfileView, type Start, type State, type Template,
 } from '../shared'
@@ -18,14 +18,13 @@ function imageRatio({ size, config }: Parameters) {
 
 export function comparisonSpecs(parameters: Parameters, official: boolean) {
   const { size, config, priority } = parameters
-  return [...new Set([imageRatio(parameters), !official && size, config.resolution,
+  return [...new Set([imageRatio(parameters), !official && size, config.resolution, config.output_format === 'gif' && 'GIF 动图',
     official && (priority ? '高优先级队列' : '普通队列')].filter(Boolean))].join(' · ')
 }
 
 interface Option {
   key: string
   name: string
-  price: string
   parameters: Parameters
   id: string
   model: string
@@ -37,9 +36,9 @@ export function comparisonOptions(profiles: ProfileView[], official: ProfileView
   currentId: string, currentModel: string, mode: string, assets: Picked[], primary: Parameters, features?:State['modelFeatures']): Option[] {
   const options: Option[] = []
   const current = profiles.find(p => p.Id === currentId) ?? official
-  const add = (id: string, model: string, name: string, price: string, parameters: Parameters, p: ProfileView, t?: Template) => {
+  const add = (id: string, model: string, name: string, parameters: Parameters, p: ProfileView, t?: Template) => {
     if (model === currentModel && (id === currentId || p?.BaseUrl === current?.BaseUrl)) return
-    options.push({ key: JSON.stringify([id, model]), id, model, name, price, parameters, profile: p, template: t })
+    options.push({ key: JSON.stringify([id, model]), id, model, name, parameters, profile: p, template: t })
   }
   function officialOptions(id: string, p: ProfileView) {
     if (!p.hasKey) return
@@ -51,7 +50,7 @@ export function comparisonOptions(profiles: ProfileView[], official: ProfileView
         if (field.Options?.some(o => o.Value === requested)) config[field.Key] = requested
       }
       const parameters = { config, size: String(config.aspect ?? config.ratio ?? primary.size), priority: primary.priority }
-      add(id, t.Key, (id === '@site' ? '官网' : p.Name) + ' · ' + t.Name, quote(t, config, parameters.priority), parameters, p, t)
+      add(id, t.Key, (id === '@site' ? '官网' : p.Name) + ' · ' + t.Name, parameters, p, t)
     }
   }
   if (official) officialOptions('@site', official)
@@ -68,10 +67,16 @@ export function comparisonOptions(profiles: ProfileView[], official: ProfileView
       const sizes=profileSizes(p, model, declared?.sizes)
       const size=[primary.size,ratio].find(v=>sizes.includes(v))??sizes[0]
       const allowCustom = p.Controls?.customSize && !declared?.sizes.length && /^\d+x\d+$/.test(primary.size)
-      const parameters=p.Id===currentId?{...primary,size:allowCustom?primary.size:size}:{
+      const parameters: Parameters = p.Id===currentId?{...primary,size:allowCustom?primary.size:size}:{
         size,config:{mode,resolution:resolutions.includes(String(primary.config.resolution))?primary.config.resolution:resolutions[0]??'',
           ratio:ratios.includes(ratio)?ratio:ratios[0]??''},priority:0}
-      add(p.Id,model,p.Name+' · '+model,p.ProtocolId==='comfy-image'?'由所连 ComfyUI 运行':'由服务商结算',parameters,p)
+      if (p.Id !== currentId && p.ProtocolId === 'openai-image' && current?.ProtocolId === 'openai-image' && primary.config.output_format === 'gif') {
+        parameters.config.output_format = 'gif'
+        for (const field of gifParameters) {
+          parameters.config[field.key] = primary.config[field.key] ?? field.default
+        }
+      }
+      add(p.Id, model, p.Name + ' · ' + model, parameters, p)
     }
   }
   return options

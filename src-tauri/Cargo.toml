@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 semver = "1"
 image = { version="0.25", default-features=false, features= ["png", "jpeg", "webp", "gif"] }
+gif = "0.14"
 base64 = "0.22"
 tempfile = "3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

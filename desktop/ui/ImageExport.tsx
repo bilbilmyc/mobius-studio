@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Editor'
 import type { JobView } from '../shared'
 import { aspect, fitSize, requestedGeometry } from './outputSpecs'
+import { isGif } from './gifInfo'
 export function ImageExport({
   job,
   url,
@@ -18,6 +19,22 @@ export function ImageExport({
   saved: (s: string, engine: string, fallback: string) => void
 }) {
   const request = requestedGeometry(job)
+  const gif = isGif(job)
+  const [format, setFormat] = useState<'gif' | 'png'>(gif ? 'gif' : 'png')
+  const still = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const canvas = still.current
+    if (!canvas) return
+    const source = new Image()
+    source.onload = () => {
+      const scale = Math.min(1, 600 / Math.max(source.naturalWidth, source.naturalHeight))
+      canvas.width = Math.max(1, Math.round(source.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(source.naturalHeight * scale))
+      canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height)
+    }
+    source.src = url
+    return () => { source.onload = null }
+  }, [url, format])
   const initial = request?.ratio ?? aspect(w, h)
   const dimensions = (r: string) => r === request?.ratio && request.pixels ? request.pixels : fitSize(w, h, r)
   const [[width, height], size] = useState(() => dimensions(initial)),
@@ -42,7 +59,7 @@ export function ImageExport({
     try {
       const result = await window.studio.exportSized(
         job.id,
-        { width, height, fit },
+        { width, height, fit, format },
         choose,
       )
       if (result.path) {
@@ -73,16 +90,23 @@ export function ImageExport({
                 'min(100%, ' + (190 * (width || 1)) / (height || 1) + 'px)',
             }}
           >
-            <img
+            {gif && format === 'png' ? <canvas ref={still} role="img" aria-label="首帧导出构图预览"
+              style={{ width: '100%', height: '100%', objectFit: fit === 'crop' ? 'cover' : 'contain' }} /> : <img
               src={url}
               alt="导出构图预览"
               style={{ objectFit: fit === 'crop' ? 'cover' : 'contain' }}
-            />
+            />}
           </div>
         </div>
         <small>
-          原图 {w} × {h} · {aspect(w, h)}　输出 PNG
+          原图 {w} × {h} · {aspect(w, h)}　输出 {format.toUpperCase()}
         </small>
+        {gif && <label>导出格式
+          <select value={format} onChange={e => setFormat(e.target.value as 'gif' | 'png')}>
+            <option value="gif">GIF 动图（保留帧间隔与循环）</option>
+            <option value="png">导出首帧 PNG</option>
+          </select>
+        </label>}
         <label>
           导出画幅
           <select

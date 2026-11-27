@@ -306,3 +306,7 @@ main:has(> .preferences) > :is(.top, .preferences, .status) { width: 100%; max-w
 .template-library small { color:var(--dim); overflow-wrap:anywhere; }
 .template-edit textarea { min-height:96px; }
 .template-library select { width:100%; min-width:0; }
+.gif-preset { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.gif-preset small { color: var(--dim); }
+.gif-evidence { display: block; color: var(--aqua); margin-block: 5px; }
+.gif-preset [aria-pressed="true"] { color: var(--aqua); }

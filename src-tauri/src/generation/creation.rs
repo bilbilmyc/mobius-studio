@@ -52,6 +52,38 @@ pub fn validate_controls(c: &Controls) -> Result<()> {
     }
     Ok(())
 }
+fn prepare_openai_image_output(j: &mut Job) -> Result<()> {
+    let fields = preset("openai-image")["gifParameters"].as_array().unwrap();
+    match j.settings.get("output_format") {
+        Some(format) if format == "gif" => {
+            if j.mask.is_some() {
+                return Err("GIF 动图不支持遮罩，请先移除遮罩。".into());
+            }
+            for field in fields {
+                let value = j
+                    .settings
+                    .entry(string(&field["key"]))
+                    .or_insert_with(|| field["default"].clone());
+                let min = field["min"].as_u64().unwrap();
+                let max = field["max"].as_u64().unwrap();
+                if !value.as_u64().is_some_and(|n| (min..=max).contains(&n)) {
+                    return Err(format!(
+                        "{}须为 {min}–{max} 之间的整数。",
+                        string(&field["label"])
+                    ));
+                }
+            }
+        }
+        Some(format) if format != "" => return Err("图片输出格式无效。".into()),
+        _ => {
+            j.settings.remove("output_format");
+            for field in fields {
+                j.settings.remove(string(&field["key"]));
+            }
+        }
+    }
+    Ok(())
+}
 pub fn prepare_with_limit(
     j: &mut Job,
     c: Option<&Controls>,
@@ -268,6 +300,9 @@ pub fn prepare_with_limit(
     if j.protocol_id == "comfy-image" {
         crate::providers::comfy::prepare(j)?;
     }
+    if j.protocol_id == "openai-image" {
+        prepare_openai_image_output(j)?;
+    }
     if let Some(q) = j.settings.get("quality") {
         if j.protocol_id != "openai-image"
             || !matches!(q.as_str(), Some("" | "auto" | "low" | "medium" | "high"))
@@ -276,4 +311,27 @@ pub fn prepare_with_limit(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gif_defaults_and_mask_validation_follow_the_selected_format() {
+        let mut job = Job::default();
+        job.settings.insert("output_format".into(), json!("gif"));
+        prepare_openai_image_output(&mut job).unwrap();
+        assert_eq!(job.settings["frame_count"], 9);
+        assert_eq!(job.settings["frame_duration_ms"], 200);
+
+        job.mask = Some(Asset::default());
+        assert!(prepare_openai_image_output(&mut job)
+            .unwrap_err()
+            .contains("遮罩"));
+        job.settings.insert("output_format".into(), json!(""));
+        prepare_openai_image_output(&mut job).unwrap();
+        assert!(job.settings.is_empty());
+        assert!(job.mask.is_some());
+    }
 }

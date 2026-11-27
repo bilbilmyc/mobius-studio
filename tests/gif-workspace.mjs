@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict'
+import path from 'node:path'
+import { readdir, readFile, unlink, writeFile } from 'node:fs/promises'
+
+export async function exerciseGifWorkspace({ page, restart, data, temp, png }) {
+  const button = name => page.getByRole('button', { name, exact: true })
+  const dialog = name => page.getByRole('dialog', { name, exact: true })
+  await button('作品库').click()
+  await page.getByLabel('筛选作品').selectOption('gif')
+  assert.equal(await page.locator('.work-card').count(), 3)
+  await button('对比作品').click()
+  await page.getByRole('checkbox', { name: '选择对比作品 小猫眨眼', exact: true }).check()
+  await page.getByRole('checkbox', { name: '选择对比作品 参考图眨眼', exact: true }).first().check()
+  await button('开始对比（2/2）').click()
+  const compare = dialog('作品对比')
+  await compare.getByRole('button', { name: '同时从头播放' }).click()
+  assert.equal(await compare.locator('img').count(), 2)
+  const differences = await compare.locator('tbody th').allTextContents()
+  assert.ok(differences.includes('提示词') && differences.includes('创作方式'))
+  assert.ok(!differences.includes('帧数') && !differences.includes('模型'))
+  await compare.getByRole('button', { name: '关闭' }).click()
+  await button('取消选择').click()
+  await page.locator('.work-card .card').filter({ hasText: '小猫眨眼' }).dblclick()
+  for (let i = 0; i < 2; i++) {
+    await button('模型能力与实测').click()
+    assert.match(await dialog('模型能力与实测').innerText(), /GIF 1 × 1 · 2 帧/)
+    await dialog('模型能力与实测').getByRole('button', { name: '关闭' }).click()
+    assert.doesNotMatch(await page.locator('.detail').innerText(), /预估|账单|实扣|[¥￥]/)
+    assert.equal(await page.locator('.output-specs').count(), 1)
+  }
+  assert.match(await page.locator('.output-specs').innerText(), /实际 GIF\s+1 × 1 · 2 帧 · 8.33 帧\/秒/)
+  const dir = path.join(data, '作品', '导出')
+  for (const ext of ['gif', 'png']) {
+    await button('按尺寸导出').click()
+    const resize = dialog('按尺寸导出图片')
+    assert.equal(await resize.getByLabel('导出格式').inputValue(), 'gif')
+    if (ext === 'png') await resize.getByLabel('导出格式').selectOption('png')
+    await resize.getByLabel('宽度（像素）').fill('4')
+    await resize.getByLabel('高度（像素）').fill('3')
+    await resize.getByRole('button', { name: '导出到作品目录' }).click()
+    await resize.waitFor({ state: 'hidden' })
+    const name = (await readdir(dir)).find(n => n.endsWith('-4x3.' + ext))
+    assert.ok(name)
+    const bytes = await readFile(path.join(dir, name))
+    assert.equal(ext === 'gif' ? bytes.toString('ascii', 0, 3) : bytes.toString('ascii', 1, 4), ext.toUpperCase())
+  }
+  await button('复用参数').click()
+  await button('复用参数').waitFor({ state: 'hidden' })
+  await page.getByLabel('创作方式', { exact: true }).selectOption('i2i')
+  const files = ['草稿参考甲.png', '草稿参考乙.png'].map(name => path.join(temp, name))
+  for (const file of files) await writeFile(file, png)
+  await page.evaluate(files => {
+    const pick = window.studio.pick
+    window.studio.pick = async kind => { window.studio.pick = pick; return window.studio.drop(kind, files) }
+  }, files)
+  await page.getByRole('button', { name: /选择本地文件/ }).first().click()
+  await page.locator('.file-row').nth(1).waitFor()
+  await button('流畅预设').click()
+  await page.locator('#prompt').fill('图片自由草稿')
+  await button('视频').click()
+  await page.locator('#prompt').fill('待继续的视频自由草稿')
+  page = await restart()
+  assert.equal(await page.locator('#prompt').inputValue(), '图片自由草稿')
+  assert.equal(await page.getByLabel('每帧时长（毫秒）').inputValue(), '40')
+  assert.equal(await page.getByLabel('帧数', { exact: true }).inputValue(), '16')
+  for (const file of files) await unlink(file)
+  const picks = await page.evaluate(async () => {
+    const draft = (await window.studio.freeDrafts()).find(d => d.kind === 'image')
+    return Object.values(draft.editor.variants).flatMap(v => v.byMode.i2i ?? [])
+  })
+  assert.deepEqual(picks.map(p => p.name), files.map(file => path.basename(file)))
+  const previews = await page.evaluate(picks => Promise.all(picks.map(p => window.studio.preview(p))), picks)
+  assert.ok(previews.every(Boolean))
+  await button('视频').click()
+  assert.equal(await page.locator('#prompt').inputValue(), '待继续的视频自由草稿')
+}

@@ -68,6 +68,9 @@ impl Studio {
         (self.notify)(Some(id));
     }
     fn update(&self, j: &mut Job, status: &str, detail: &str) -> Result<()> {
+        if status == "done" {
+            j.gif = self.store.read_job_gif(j);
+        }
         if status != j.status || detail != j.detail {
             j.progress_at = Some(Utc::now().timestamp_millis());
         }
@@ -310,6 +313,12 @@ impl Studio {
                 continue;
             }
             if j.status == "done" {
+                if j.gif.is_none() {
+                    j.gif = self.store.read_job_gif(&j);
+                    if j.gif.is_some() {
+                        self.store.save_job(&j)?;
+                    }
+                }
                 if let Some(copy) = j
                     .cloud
                     .as_mut()

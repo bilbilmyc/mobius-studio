@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { invoke } from './ipc'
 import { Modal } from './Editor'
+import type { GifInfo } from '../shared'
+import { gifSpecs } from './gifInfo'
 export interface Features {
   sizes: string[]
   maxImages: number | null
@@ -9,6 +11,7 @@ export interface Features {
   multi: number | null
 }
 interface Evidence {
+  verifiedGif?: GifInfo | null
   declared: Features | null
   listed: boolean
   tested: {
@@ -18,19 +21,22 @@ interface Evidence {
     mask: boolean
     results: number
     at: number
+    gif?: GifInfo | null
   }[]
 }
 const blank: Features = { sizes: [], maxImages: null, firstLast: null, mask: null, multi: null }
-export function useFeatures(profileId?: string, model?: string) {
+export function useFeatures(profileId?: string, model?: string, completedResults?: number) {
   const [record, set] = useState<{ key: string; e: Evidence }>(),
     [error, setError] = useState('')
   const key = JSON.stringify([profileId, model])
   const activeKey = useRef(key)
   activeKey.current = key
+  const generation = useRef(0)
   const load = useCallback(async () => {
     if (!profileId || !model) return
+    const request = ++generation.current
     const e = await invoke<Evidence>('get_model_features', { profileId, model })
-    if (activeKey.current === key) {
+    if (activeKey.current === key && request === generation.current) {
       set({ key, e })
       setError('')
     }
@@ -38,7 +44,7 @@ export function useFeatures(profileId?: string, model?: string) {
   useEffect(() => {
     setError('')
     void load().catch((e) => setError(String(e)))
-  }, [load])
+  }, [load, completedResults])
   return { e: record?.key === key ? record.e : undefined, load, error }
 }
 export function ModelFeatures({
@@ -94,6 +100,7 @@ export function ModelFeatures({
   }
   return (
     <>
+      {record.e?.verifiedGif && <small className="gif-evidence">GIF 已实测 · {gifSpecs(record.e.verifiedGif)}</small>}
       <button
         onClick={() => {
           const current = record.e?.declared ?? blank
@@ -151,6 +158,7 @@ export function ModelFeatures({
                   <li key={i}>
                     {new Date(t.at).toLocaleString()} · {t.size} · {t.mode} · {t.references} 张参考 ·{' '}
                     {t.results} 个结果{t.mask ? ' · 使用遮罩' : ''}
+                    {t.gif && ' · GIF ' + gifSpecs(t.gif)}
                   </li>
                 ))}
               </ul>

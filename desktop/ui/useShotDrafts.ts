@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { Composer, MediaKind, Picked, Script, ShotDraft, ShotLink } from '../shared'
+import type { Composer, FreeDraft, MediaKind, Picked, Script, ShotDraft, ShotLink } from '../shared'
 import { defaultTemplate, siteTemplate } from '../shared'
 
 const empty = (): Composer => ({ service: '@site', models: {}, templates: {}, prompt: '', variants: {}, compare: '' })
@@ -19,20 +19,25 @@ function references(editor: Composer) {
 export function useShotDrafts(report: (s: string) => void) {
   const book = useRef(new Map<string, ShotDraft>())
   const free = useRef({ image: empty(), video: empty() })
-  const dirty = useRef(new Map<string, ShotDraft>())
+  const dirty = useRef(new Map<string, ShotDraft | FreeDraft>())
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const writing = useRef<Promise<void> | null>(null)
   const [bindings, bind] = useState<Partial<Record<MediaKind, ShotLink>>>({})
   const [ready, setReady] = useState(false), [, redraw] = useState(0)
   const [status, setStatus] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   function flush(): Promise<void> {
+    clearTimeout(timer.current)
     if (writing.current) return writing.current
     if (!dirty.current.size) return Promise.resolve()
     setStatus('正在保存草稿…')
     writing.current = (async () => {
       while (dirty.current.size) {
         const [key, entry] = dirty.current.entries().next().value!
-        await window.studio.saveShotDraft(entry, references(entry.editor))
+        const picks = references(entry.editor)
+        if ('shot' in entry) await window.studio.saveShotDraft(entry, picks)
+        else await window.studio.saveFreeDraft(entry, picks)
         if (dirty.current.get(key) === entry) dirty.current.delete(key)
       }
       setStatus('草稿已保存')
@@ -43,13 +48,19 @@ export function useShotDrafts(report: (s: string) => void) {
     }).finally(() => { writing.current = null })
     return writing.current
   }
-  useEffect(() => {
-    let alive = true
-    window.studio.shotDrafts().then(entries => {
-      if (!alive) return
-      for (const entry of entries) book.current.set(keyOf(entry.kind, entry.shot), entry)
+  const loadDrafts = useCallback(async () => {
+    try {
+      const [shots, drafts] = await Promise.all([window.studio.shotDrafts(), window.studio.freeDrafts()])
+      for (const entry of shots) book.current.set(keyOf(entry.kind, entry.shot), entry)
+      for (const entry of drafts) free.current[entry.kind] = entry.editor
+      setLoadError('')
       setReady(true)
-    }).catch(e => report('读取分镜草稿失败。' + String(e)))
+    } catch (e) {
+      setLoadError('读取创作草稿失败。' + String(e))
+    }
+  }, [])
+  useEffect(() => {
+    void loadDrafts()
     const unsubscribe = getCurrentWindow().onCloseRequested(async event => {
       // The native window handles closing to the tray. Only an explicit quit can exit.
       event.preventDefault()
@@ -57,8 +68,8 @@ export function useShotDrafts(report: (s: string) => void) {
       try { await flush(); saved = true } catch { /* flush already reports the error */ }
       try { await window.studio.finishWindowClose(saved) } catch (e) { report(String(e)) }
     })
-    return () => { alive = false; void unsubscribe.then(off => off()) }
-  }, [report])
+    return () => { clearTimeout(timer.current); void unsubscribe.then(off => off()) }
+  }, [report, loadDrafts])
 
   function get(kind: MediaKind, shot?: ShotLink): Composer {
     return shot ? book.current.get(keyOf(kind, shot))?.editor ?? empty() : free.current[kind]
@@ -66,7 +77,7 @@ export function useShotDrafts(report: (s: string) => void) {
   function change(kind: MediaKind, shot: ShotLink | undefined, edit: (editor: Composer) => Composer, background = false) {
     const key = keyOf(kind, shot)
     const saved = shot && book.current.get(key)
-    if (shot && (!ready || (background && !saved))) return
+    if (!ready || (shot && background && !saved)) return
     const previous = get(kind, shot)
     const editor = edit(previous)
     if (previous === editor) return
@@ -75,7 +86,12 @@ export function useShotDrafts(report: (s: string) => void) {
       book.current.set(key, entry)
       dirty.current.set(key, entry)
       void flush().catch(() => {})
-    } else free.current[kind] = editor
+    } else {
+      free.current[kind] = editor
+      dirty.current.set(key, { kind, editor, updated: Date.now() })
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => void flush().catch(() => {}), 250)
+    }
     redraw(n => n + 1)
   }
   function select(kind: MediaKind, shot?: ShotLink) {
@@ -110,5 +126,5 @@ export function useShotDrafts(report: (s: string) => void) {
   for (const entry of book.current.values())
     if (!latest || latest.updated < entry.updated) latest = entry
   async function reload() {await flush();const entries=await window.studio.shotDrafts();for(const entry of entries)book.current.set(keyOf(entry.kind,entry.shot),entry);redraw(n=>n+1)}
-  return { get, change, select, open, syncScript, flush, reload, ready, bindings, latest, status }
+  return { get, change, select, open, syncScript, flush, reload, ready, loadDrafts, loadError, bindings, latest, status }
 }

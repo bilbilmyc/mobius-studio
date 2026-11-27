@@ -1,6 +1,10 @@
 {
   "comfy-image":{"title":"ComfyUI · 本地图片","base":"http://127.0.0.1:8188","model":"","modes":["t2i","i2i"],"sizes":["512x512","768x768","1024x1024","1216x832","832x1216"],"seconds":[],"resolutions":[],"maxImages":1},
   "openai-image":{"title":"OpenAI 兼容图片","base":"","model":"","modes":["t2i","i2i"],"sizes":["1024x1024","1536x1024","1024x1536","auto"],"seconds":[],"resolutions":[],"maxImages":16,
+    "gifParameters":[
+      {"key":"frame_count","label":"帧数","default":9,"min":2,"max":16},
+      {"key":"frame_duration_ms","label":"每帧时长（毫秒）","default":200,"min":20,"max":2000}
+    ],
     "highResolutionSizes":[
       {"size":"2048x2048","label":"2K 方图"},
       {"size":"2048x1152","label":"2K 横图"},

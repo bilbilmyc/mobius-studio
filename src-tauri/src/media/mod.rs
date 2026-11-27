@@ -1,6 +1,7 @@
 pub(crate) mod export;
 pub(crate) mod film;
 pub(crate) mod formats;
+pub(crate) mod gif;
 pub(crate) mod masks;
 pub(crate) mod media_tools;
 #[cfg(target_os = "linux")]

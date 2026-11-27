@@ -235,7 +235,7 @@ export async function exerciseMaximizedScript({ page, shot }) {
     console.log('Native maximized script: ' + JSON.stringify(size))
     await shot('剧本-最大化', page)
     const actions = page.getByRole('group', {name:'剧本操作'})
-    for (const name of ['编辑剧本', '镜头队列与预算', '整片预览与交付']) {
+    for (const name of ['编辑剧本', '镜头队列', '整片预览与交付']) {
       await actions.getByRole('button', {name, exact:true}).click()
       const dialog = page.getByRole('dialog', {name, exact:true})
       await dialog.waitFor()

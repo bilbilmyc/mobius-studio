@@ -48,6 +48,7 @@ export interface Template {
   Slots: Slot[]
 }
 export const templates = rawTemplates as Template[]
+export const gifParameters = generationPresets['openai-image'].gifParameters
 export const siteBase = 'https://queueapi.vylai.com/openapi'
 export const workbench = 'https://rh.vylai.com/workbench'
 export const isSite = (p: Protocol) => p === 'rh-image' || p === 'rh-video'
@@ -386,7 +387,7 @@ export interface Job {
   CreatedUtc: string
 }
 export interface JobView {
-  estimatedCny?: number|null
+  gif?: GifInfo | null
   candidateIds?: string[]
   sourceJob?: string
   shot?: ShotLink | null
@@ -544,9 +545,11 @@ export interface PromptResult { text: string; model: string }
 export interface OptimizedPrompt extends PromptResult { source?: 'conversation' | 'template'; templateName?: string; mode: OptimizationMode; references?: PromptReferences }
 export interface PromptSuggestion extends OptimizedPrompt { original: string; edited?: boolean }
 export interface ShotDraft { shot: ShotLink; kind: MediaKind; editor: Composer; updated: number }
+export type FreeDraft = Omit<ShotDraft, 'shot'>
 export interface Comparison { id: string; jobIds: [string, string]; selected: string | null }
 export type PerformanceMode = 'auto' | 'eco' | 'performance'
-export interface ExportSize { width: number; height: number; fit: 'crop' | 'contain' }
+export interface GifInfo { width: number; height: number; frames: number; durationMs: number; frameMs: number | null; repeats: number | null }
+export interface ExportSize { width: number; height: number; fit: 'crop' | 'contain'; format?: 'gif' | 'png' }
 export const defaultConfig = (t: Template): Record<string, Value> =>
   Object.fromEntries(t.Fields.map((f) => [f.Key, f.Default]))
 export function slots(t: Template, config: Record<string, Value>): Slot[] {
@@ -563,27 +566,6 @@ export function slots(t: Template, config: Record<string, Value>): Slot[] {
     ]
   }
   return t.Slots
-}
-export function quote(
-  t: Template,
-  config: Record<string, Value>,
-  priority: number,
-) {
-  let rate = priority ? t.FastRate : t.Rate
-  for (const f of t.Fields)
-    rate *= f.Options?.find((o) => o.Value === config[f.Key])?.Factor ?? 1
-  const inputSeconds = t.PerSecond && !config.duration
-  const price =
-    rate * (t.PerSecond && !inputSeconds ? Number(config.duration) : 1)
-  return (
-    (inputSeconds ? '按输入视频时长　¥' : '预计　¥') +
-    price.toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 4,
-      useGrouping: false,
-    }) +
-    (inputSeconds ? ' / 秒' : '')
-  )
 }
 export const statusLabels: Record<string, string> = {
   reviewed: '已人工核对', cancelled: '远端已取消', missing: '本地记录缺失', queued: '待发送', withdrawn: '已撤回', archived: '已导入历史',
@@ -613,6 +595,8 @@ export interface Bridge extends PromptAgentBridge {
   optimizePrompt(input: PromptOptimization): Promise<PromptResult>
   createScript(story: Screenplay): Promise<Script>
   shotDrafts(): Promise<ShotDraft[]>
+  freeDrafts(): Promise<FreeDraft[]>
+  saveFreeDraft(draft: FreeDraft, picks: Picked[]): Promise<void>
   saveShotDraft(draft: ShotDraft, picks: Picked[]): Promise<void>
   startComparison(inputs: [Start, Start]): Promise<Comparison>
   selectComparison(id: string, jobId: string): Promise<void>

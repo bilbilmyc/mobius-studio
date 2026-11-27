@@ -64,6 +64,8 @@ pub struct Job {
     pub result_url: Option<String>,
     pub file_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub gif: Option<crate::media::gif::GifInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud: Option<CloudCopy>,
     pub created_utc: String,
 }

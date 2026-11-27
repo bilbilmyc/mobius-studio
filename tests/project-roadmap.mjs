@@ -447,8 +447,6 @@ export async function exerciseRoadmap({ page, data, temp, png, video, templates,
     const batchMasks = await call('create_batch', {
       inputs: [painted],
       limit: 1,
-      budget: null,
-      allowUnknown: true,
     })
     const [maskedId] = await jobIds(batchMasks)
     await call('run_batch', { id: batchMasks })
@@ -525,12 +523,11 @@ export async function exerciseRoadmap({ page, data, temp, png, video, templates,
     const dialog = page.getByRole('dialog', { name: '整片预览与交付' })
     await dialog.getByText(/总时长 3\.00 秒/).waitFor()
     await button('关闭', dialog).click()
-    await button('镜头队列与预算').click()
-    await page
-      .getByRole('dialog', { name: '镜头队列与预算' })
-      .getByText(/次提交 · 已知预估/)
-      .waitFor()
-    await button('关闭', page.getByRole('dialog', { name: '镜头队列与预算' })).click()
+    await button('镜头队列').click()
+    const queue = page.getByRole('dialog', { name: '镜头队列' })
+    await queue.getByText(/^共 \d+ 次提交$/).waitFor()
+    assert.doesNotMatch(await queue.innerText(), /[¥￥]|预估|预算|价格|结算/)
+    await button('关闭', queue).click()
     await button('创作台').click()
     await button('图片').click()
     await page.getByLabel('生成服务', { exact: true }).selectOption(open)

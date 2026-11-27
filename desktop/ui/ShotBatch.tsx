@@ -7,7 +7,6 @@ import {
   officialModes,
   presets,
   profileModels,
-  quote,
   siteTemplate,
   statusLabels,
   type MediaKind,
@@ -108,7 +107,7 @@ function shotPlan(script: Script, index: number, kind: MediaKind, drafts: ShotDr
           state.modelFeatures
         )
       : []
-  return { input, peers, compare: e?.compare ?? '', name: native ? t.Name : (model ?? ''), profile }
+  return { input, peers, compare: e?.compare ?? '', name: native ? t.Name : (model ?? ''), native, profile }
 }
 interface BatchItem {
   id: string
@@ -116,7 +115,6 @@ interface BatchItem {
   shot?: { scriptId: string; sceneId: string; label: string }
   status: string
   priority?: number
-  estimate: number | null
 }
 interface Batch {
   id: string
@@ -138,9 +136,7 @@ export function ShotBatch({
   const [kind, setKind] = useState<MediaKind>('image'),
     [skip, setSkip] = useState<string[]>([]),
     [choices, setChoices] = useState<Record<string, string>>({})
-  const [budget, setBudget] = useState(''),
-    [limit, setLimit] = useState(1),
-    [unknown, allow] = useState(false),
+  const [limit, setLimit] = useState(1),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('')
   const refresh = () => invoke<Batch[]>('list_batches').then(setBatches)
@@ -197,9 +193,9 @@ export function ShotBatch({
     }
     const times = peer ? 2 : (plan.input.repeat ?? 1),
       outputs = peer ? 2 : Math.max(plan.input.count ?? 1, times)
-    const t = isSite((plan.profile as ProfileView | undefined)?.ProtocolId ?? 'rh-image')
-      ? siteTemplate(plan.input.template)
-      : undefined
+    const execution = plan.native
+      ? (plan.input.priority ? '优先队列' : '普通队列')
+      : localComfy(plan.profile) ? '本地运行' : plan.profile?.Name
     return (
       <li key={scene.id}>
         <label>
@@ -210,15 +206,7 @@ export function ShotBatch({
           />
           第 {i + 1} 镜 · {scene.heading} · {times} 次提交 · {outputs} 个结果
         </label>
-        <small>
-          {plan.name} ·{' '}
-          {t
-            ? quote(t, plan.input.config, plan.input.priority) +
-              (plan.input.priority ? ' · 优先队列' : ' · 普通队列')
-            : localComfy(plan.profile)
-              ? '本地运行'
-              : '价格未知'}
-        </small>
+        <small>{[plan.name, execution].filter(Boolean).join(' · ')}</small>
         {(plan.peers.length > 0 || value) && (
           <label>
             第二模型
@@ -234,7 +222,7 @@ export function ShotBatch({
               )}
               {plan.peers.map((p) => (
                 <option key={p.key} value={p.key}>
-                  {p.name} · {p.price}
+                  {p.name}
                   {p.template ? (p.parameters.priority ? ' · 优先队列' : ' · 普通队列') : ''}
                 </option>
               ))}
@@ -244,21 +232,7 @@ export function ShotBatch({
       </li>
     )
   })
-  let known = 0,
-    unpriced = 0,
-    submitCount = 0
-  for (const input of inputs) {
-    const times = input.repeat ?? 1
-    submitCount += times
-    const p = data?.state.profiles.find((v) => v.Id === input.profileId),
-      site = input.profileId === '@site' || (p && isSite(p.ProtocolId))
-    const t = site && siteTemplate(input.template)
-    if (t && (!t.PerSecond || input.config.duration)) {
-      known += times * Number(quote(t, input.config, input.priority).split('¥')[1])
-    } else if (!localComfy(p)) {
-      unpriced += times
-    }
-  }
+  const submitCount = inputs.reduce((total, input) => total + (input.repeat ?? 1), 0)
   async function act(fn: () => Promise<unknown>) {
     setBusy(true)
     setError('')
@@ -272,7 +246,7 @@ export function ShotBatch({
     }
   }
   return (
-    <Modal wide title="镜头队列与预算" close={close}>
+    <Modal wide title="镜头队列" close={close}>
       <div className="project-tools">
         <label>
           媒体类型
@@ -282,21 +256,7 @@ export function ShotBatch({
           </select>
         </label>
         {data ? <ol>{rows}</ol> : <p role="status">正在读取各镜草稿和模型参数…</p>}
-        {data && (
-          <p>
-            {submitCount} 次提交 · 已知预估 ¥{known.toFixed(2)} · {unpriced} 项价格未知
-          </p>
-        )}
-        <label>
-          本批预算（元，可留空）
-          <input
-            type="number"
-            min="0"
-            step=".01"
-            value={budget}
-            onChange={(e) => setBudget(e.target.value)}
-          />
-        </label>
+        {data && <p>共 {submitCount} 次提交</p>}
         <label>
           每个连接同时执行
           <input
@@ -307,33 +267,15 @@ export function ShotBatch({
             onChange={(e) => setLimit(Number(e.target.value))}
           />
         </label>
-        {!!unpriced && (
-          <label>
-            <input type="checkbox" checked={unknown} onChange={(e) => allow(e.target.checked)} />
-            确认包含价格未知任务，由服务商结算
-          </label>
-        )}
-        {budget !== '' && known > Number(budget) + 1e-6 && (
-          <p role="alert">已知预估超过预算，请减少镜头或调整模型。</p>
-        )}
         <button
           disabled={
             busy ||
             missingPeer ||
             !inputs.length ||
-            !!(unpriced && !unknown) ||
-            (budget !== '' && known > Number(budget) + 1e-6) ||
             plans.some((p, i) => !skip.includes(script.scenes[i].id) && typeof p === 'string')
           }
           onClick={() =>
-            void act(() =>
-              invoke('create_batch', {
-                inputs,
-                limit,
-                budget: budget === '' ? null : Number(budget),
-                allowUnknown: unknown,
-              })
-            )
+            void act(() => invoke('create_batch', { inputs, limit }))
           }
         >
           加入待发清单

@@ -152,6 +152,8 @@ pub fn run() {
             commands::projects::edit_script,
             commands::projects::list_scripts,
             commands::projects::list_shot_drafts,
+            commands::projects::list_free_drafts,
+            commands::projects::save_free_draft,
             commands::projects::save_shot_draft,
             commands::projects::set_final,
             connections::model_features::get_model_features,

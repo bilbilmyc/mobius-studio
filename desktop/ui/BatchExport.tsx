@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { type JobView, type PerformanceMode, type ExportSize } from '../shared'
 import { Modal } from './Editor'
 import { sizedExport } from './gpuExport'
+import { isGif } from './gifInfo'
 import { paginate, PageControls } from './LibraryPages'
 
 export function BatchExport({
@@ -38,7 +39,7 @@ export function BatchExport({
         if (!selected.has(j.id)) continue
         setMessage(`正在导出 ${++count} / ${selected.size}`)
         try {
-          const result = await sizedExport(j.id, size, false, mode)
+          const result = await sizedExport(j.id, isGif(j) ? { ...size, format: 'gif' } : size, false, mode)
           if (result.path) {
             if (result.engine === 'GPU') gpu++
             else cpu++

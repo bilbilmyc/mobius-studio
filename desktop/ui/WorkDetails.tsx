@@ -1,5 +1,6 @@
 import { siteTemplate, statusLabels, type Integrations, type JobView } from '../shared'
 import { CloudSave } from './CloudSave'
+import { gifSpecs, isGif } from './gifInfo'
 import { LibraryMarks, unmarked, type LibraryMark } from './LibraryMarks'
 
 interface Props {
@@ -32,7 +33,7 @@ export function WorkDetails({
       </header>
       <div className="work-description">
         <div className="work-media-info">
-          <span>{job.kind === 'video' ? '视频' : '图片'}</span>
+          <span>{job.kind === 'video' ? '视频' : isGif(job) ? 'GIF 动图' : '图片'}</span>
           <span>{statusLabels[job.status] || job.status}</span>
         </div>
         {job.prompt && (
@@ -44,6 +45,7 @@ export function WorkDetails({
       <LibraryMarks id={job.id} mark={mark ?? unmarked} disabled={!mark} changed={changed} />
       <CloudSave job={job} settings={settings} configure={configureStorage} report={report} />
       <dl className="work-facts">
+        {job.gif && <div><dt>规格</dt><dd>{gifSpecs(job.gif)}</dd></div>}
         {model && (
           <div>
             <dt>模型</dt>

@@ -364,6 +364,7 @@ fn exports_exact_dimensions_and_preserves_the_original() {
             width: 16,
             height: 9,
             fit: fit.into(),
+            format: Default::default(),
         };
         write_copy(&from, &dest, Some(&spec)).unwrap();
         let im = image::open(dest).unwrap().to_rgb8();
@@ -383,7 +384,8 @@ fn exports_exact_dimensions_and_preserves_the_original() {
     assert!(Resize {
         width: 50_000,
         height: 30_000,
-        fit: "crop".into()
+        fit: "crop".into(),
+        format: Default::default(),
     }
     .validate()
     .is_err());
@@ -403,6 +405,7 @@ fn contain_export_composites_every_pixel_onto_opaque_black() {
         width: 3,
         height: 3,
         fit: "contain".into(),
+        format: Default::default(),
     };
     write_copy(&source, &target, Some(&spec)).unwrap();
     let pixels = image::open(target).unwrap().to_rgba8();

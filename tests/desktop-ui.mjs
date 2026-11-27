@@ -15,7 +15,8 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
-import { creationMock, exerciseCreation } from './creation-matrix.mjs'
+import { creationMock, exerciseCreation, exerciseGifOutput } from './creation-matrix.mjs'
+import { exerciseGifWorkspace } from './gif-workspace.mjs'
 import { workspaceMock, exerciseWorkspace } from './workspace-flows.mjs'
 import { comfyFixture, exerciseComfy, seedGallery, exerciseGallery } from './studio-24.mjs'
 import { exerciseLibraryLayout } from './library-layout.mjs'
@@ -213,6 +214,15 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  if (process.argv.includes('--gif-only')) {
+    relay = await listen(creationMock({ png }).handle)
+    await start()
+    await exerciseGifOutput({ page, base: origin(relay) + '/v1', record, state, done, png, temp })
+    await exerciseGifWorkspace({ page, restart: restartNormally, data, temp, png })
+    assert.deepEqual(errors, [])
+    console.log('GIF generation, playback comparison, export, task details and free draft recovery passed')
+    return
+  }
   // Run with an isolated test build whose version is below the published stable release.
   if (process.argv.includes('--startup-update-live')) {
     await start()

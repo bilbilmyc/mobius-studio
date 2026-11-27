@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  overscroll-behavior: none;
   font:
     14px/1.5 'Microsoft YaHei UI',
     'PingFang SC',

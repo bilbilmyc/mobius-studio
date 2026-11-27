@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
+import { waitForValue } from './wait-for-value.mjs'
 
 const publicFrame = 'https://media.example.invalid/keyframes/tail.png'
 const pixel = 'data:image/png;base64,'
+// A black frame and a white frame, each displayed for 120 ms.
+const animatedGif = 'R0lGODlhAQABAIAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQADAAAACwAAAAAAQABAAACAkQBACH5BAAMAAAALAAAAAABAAEAAAICTAEAOw=='
 export function creationMock({ clip, still, png }) {
   const calls = [],
     failOnce = new Set()
@@ -42,6 +45,26 @@ export function creationMock({ clip, still, png }) {
         })),
       )
     calls.push({ method: req.method, url })
+    if ((form?.get('model') ?? body.model) === 'matrix-gif') {
+      const fields = form ? Object.fromEntries(form) : body
+      if (fields.prompt === '静态对照') {
+        assert.equal(url, '/v1/images/generations')
+        for (const key of ['output_format', 'frame_count', 'frame_duration_ms']) assert.ok(!(key in fields))
+        return reply({ data: [{ b64_json: png.toString('base64') }] })
+      }
+      assert.equal(fields.output_format, 'gif')
+      assert.equal(fields.frame_count, form ? '2' : 2)
+      assert.equal(fields.frame_duration_ms, form ? '120' : 120)
+      if (fields.prompt === '请求动图但返回静图') return reply({ data: [{ b64_json: png.toString('base64') }] })
+      if (fields.prompt === '参考图眨眼') {
+        assert.equal(url, '/v1/images/edits')
+        if (form) assert.deepEqual((await files('image'))[0].bytes, png)
+        else assert.deepEqual(body.images, [{ image_url: publicFrame }])
+      } else {
+        assert.equal(url, '/v1/images/generations')
+      }
+      return reply({ data: [{ b64_json: animatedGif }] })
+    }
     if (url === '/v1/models') {
       assert.equal(req.method, 'GET')
       assert.equal(req.headers['x-api-key'], 'matrix-key')
@@ -197,6 +220,83 @@ export function creationMock({ clip, still, png }) {
   }
   return { handle, calls }
 }
+
+export async function exerciseGifOutput({ page, base, record, state, done, png, temp }) {
+  const id = await record({ name: 'GIF 测试', protocol: 'openai-image', model: 'matrix-gif', key: 'matrix-key', base })
+  await page.getByRole('button', { name: '创作台', exact: true }).click()
+  await page.getByRole('button', { name: '图片', exact: true }).click()
+  await page.getByLabel('生成服务', { exact: true }).selectOption(id)
+  const candidates = page.getByLabel('同模型候选数')
+  await candidates.selectOption('4')
+  await page.getByText('4 次独立生成请求', { exact: true }).waitFor()
+  assert.doesNotMatch(await page.locator('aside.settings').innerText(), /[¥￥]|预估|结算/)
+  await candidates.selectOption('1')
+  const format = page.getByLabel('输出格式', { exact: true })
+  const frames = page.getByLabel('帧数', { exact: true })
+  const duration = page.getByLabel('每帧时长（毫秒）', { exact: true })
+  const generate = page.getByRole('button', { name: '生成图片', exact: true })
+  const submitPrompt = async prompt => {
+    await page.locator('#prompt').fill(prompt)
+    await generate.click()
+    const job = await waitForValue(async () => (await state()).jobs.find(j => j.profileId === id && j.prompt === prompt), prompt)
+    return done(job.id)
+  }
+  assert.equal(await format.inputValue(), '')
+  assert.equal(await frames.count(), 0)
+  await format.selectOption('gif')
+  assert.equal(await frames.inputValue(), '9')
+  assert.equal(await duration.inputValue(), '200')
+  await page.getByRole('button', { name: '流畅预设' }).click()
+  assert.equal(await frames.inputValue(), '16')
+  assert.equal(await duration.inputValue(), '40')
+  assert.match(await page.locator('.gif-preset').innerText(), /25 帧\/秒 · 0.64 秒\/轮/)
+  await frames.fill('17')
+  assert.ok(await generate.isDisabled())
+  await frames.fill('2')
+  await duration.fill('120')
+  const gif = await submitPrompt('小猫眨眼')
+  assert.equal(path.extname(gif.mediaPath), '.gif')
+  assert.equal((await readFile(gif.mediaPath)).toString('base64'), animatedGif)
+  assert.deepEqual(gif.gif, { width: 1, height: 1, frames: 2, frameMs: 120, durationMs: 240, repeats: 0 })
+  const reuse = page.getByRole('button', { name: '复用参数', exact: true })
+  await reuse.waitFor()
+  await duration.fill('400')
+  await format.selectOption('')
+  await reuse.click()
+  await reuse.waitFor({ state: 'hidden' })
+  assert.equal(await format.inputValue(), 'gif')
+  assert.equal(await frames.inputValue(), '2')
+  assert.equal(await duration.inputValue(), '120')
+  const mismatch = await submitPrompt('请求动图但返回静图')
+  assert.equal(path.extname(mismatch.mediaPath), '.png')
+  assert.ok(!mismatch.gif)
+  await page.getByText('已请求 GIF 动图，服务返回了静态图片。', { exact: true }).waitFor()
+  await format.selectOption('')
+  assert.equal(await duration.count(), 0)
+  const still = await submitPrompt('静态对照')
+  assert.equal(path.extname(still.mediaPath), '.png')
+  assert.equal(still.settings.frame_count, undefined)
+
+  const source = path.join(temp, 'gif-reference.png')
+  await writeFile(source, png)
+  const [local, link] = await page.evaluate(async ([file, url]) => [
+    (await window.studio.drop('image', [file]))[0], await window.studio.link('image', url),
+  ], [source, publicFrame])
+  const edit = {
+    profileId: id, kind: 'image', template: '', prompt: '参考图眨眼', size: 'auto', seconds: 0, priority: 0,
+    config: { mode: 'i2i', output_format: 'gif', frame_count: 2, frame_duration_ms: 120 },
+  }
+  for (const asset of [local, link]) {
+    const job = await done(await page.evaluate(input => window.studio.start(input), { ...edit, assets: [asset] }))
+    assert.equal((await readFile(job.mediaPath)).toString('base64'), animatedGif)
+  }
+  for (const override of [{ frame_count: 1 }, { frame_count: 2.5 }, { frame_duration_ms: 19 }, { frame_duration_ms: 2001 }]) {
+    await assert.rejects(page.evaluate(input => window.studio.start(input), {
+      ...edit, config: { ...edit.config, ...override }, assets: [local],
+    }), /整数/)
+  }
+}
+
 export async function exerciseCreation({
   page,
   state,
@@ -215,6 +315,7 @@ export async function exerciseCreation({
   templates,
 }) {
   const before = (await state()).jobs.length
+  await exerciseGifOutput({ page, base, record, state, done, png, temp })
   // The second one-pixel PNG has a different color to make swapped file bodies detectable.
   await writeFile(
     path.join(temp, 'end.png'),

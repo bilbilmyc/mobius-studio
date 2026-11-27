@@ -2588,6 +2588,7 @@ dependencies = [
  "csv",
  "dirs",
  "futures-util",
+ "gif",
  "http",
  "image",
  "indexmap 2.14.2",

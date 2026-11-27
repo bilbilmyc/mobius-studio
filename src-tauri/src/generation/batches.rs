@@ -260,7 +260,7 @@ pub async fn create_batch(
     inputs: Vec<Start>,
     limit: usize,
     budget: Option<f64>,
-    allow_unknown: bool,
+    allow_unknown: Option<bool>,
 ) -> Result<String> {
     let s = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -284,10 +284,12 @@ pub async fn create_batch(
                 return Err("每批最多 256 次提交，候选数为 1、2 或 4。".into());
             }
             let mut j = s.build_job(input)?;
-            if let Some(cost) = estimate(&j) {
-                known += cost * repeats as f64
-            } else if !allow_unknown {
-                return Err("请确认价格未知的任务。".into());
+            if budget.is_some() || allow_unknown == Some(false) {
+                if let Some(cost) = estimate(&j) {
+                    known += cost * repeats as f64;
+                } else if allow_unknown != Some(true) {
+                    return Err("请确认价格未知的任务。".into());
+                }
             }
             freeze(&s, &mut j)?;
             j.status = "queued".into();

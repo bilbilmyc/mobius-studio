@@ -173,7 +173,7 @@ export function ScriptDesk({ active, runs, viewedRun, viewRun, integrations, sel
             <h2>{script.title}</h2></div>
           <div className="project-actions" role="group" aria-label="剧本操作">
             <button onClick={() => edit(script)}>编辑剧本</button>
-            <button onClick={() => setBatch(true)}>镜头队列与预算</button>
+            <button onClick={() => setBatch(true)}>镜头队列</button>
             <button onClick={() => setFilm(true)}>整片预览与交付</button>
           </div>
         </header>

@@ -13,6 +13,8 @@ import { BatchExport } from './BatchExport'
 import { paginate, PageControls } from './LibraryPages'
 import { WorkCard } from './WorkCard'
 import { WorkDetails } from './WorkDetails'
+import { WorkComparison } from './WorkComparison'
+import { isGif } from './gifInfo'
 import './work-library.css'
 
 const collections = [
@@ -22,10 +24,14 @@ const collections = [
 ] as const
 type Collection = (typeof collections)[number][0]
 
+function comparable(job: JobView) {
+  return job.status === 'done' && job.file && Boolean(job.mediaPath)
+}
+
 interface LibraryView {
   collection: Collection
   search: string
-  kind: MediaKind | 'all'
+  kind: MediaKind | 'gif' | 'all'
   status: JobStatusGroup | 'all'
   page: number
 }
@@ -66,6 +72,18 @@ export function WorkLibrary({
 }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [compareIds, setCompareIds] = useState<string[] | null>(null)
+  const [comparing, setComparing] = useState(false)
+  const eligible = useMemo(() => new Map(jobs.filter(comparable).map(j => [j.id, j])), [jobs])
+  const pair = (compareIds ?? []).map(id => eligible.get(id)).filter((j): j is JobView => Boolean(j))
+  function toggleComparison(id: string) {
+    setCompareIds(old => {
+      if (!old) return null
+      if (old.includes(id)) return old.filter(value => value !== id)
+      const current = old.filter(value => eligible.has(value))
+      return current.length < 2 ? [...current, id] : current
+    })
+  }
   const [marks, setMarks] = useState<Record<string, LibraryMark> | null>(null)
   useEffect(() => {
     let active = true
@@ -87,7 +105,7 @@ export function WorkLibrary({
       const mark = marks?.[j.id] ?? unmarked
       if (mark.archived !== (collection === 'archived')) return false
       if (collection === 'favorite' && !mark.favorite) return false
-      if (kind !== 'all' && j.kind !== kind) return false
+      if (kind === 'gif' ? !isGif(j) : kind !== 'all' && j.kind !== kind) return false
       if (status !== 'all' && jobStatusGroup(j.status) !== status) return false
       if (!words.length) return true
       const fields = [
@@ -143,6 +161,13 @@ export function WorkLibrary({
           {filtered.length}
           {matching ? ' 条匹配作品' : ' 件作品'}
         </small>
+        <div className="library-compare-actions">
+          {compareIds === null ? <button disabled={eligible.size < 2}
+            onClick={() => setCompareIds([])}>对比作品</button> : <>
+              <button disabled={pair.length !== 2} onClick={() => setComparing(true)}>开始对比（{pair.length}/2）</button>
+              <button onClick={() => setCompareIds(null)}>取消选择</button>
+            </>}
+        </div>
         <button
           className="library-export"
           disabled={!filtered.some((j) => j.file && j.kind === 'image' && j.status === 'done')}
@@ -167,6 +192,7 @@ export function WorkLibrary({
         >
           <option value="all">全部作品</option>
           <option value="image">仅图片</option>
+          <option value="gif">仅 GIF 动图</option>
           <option value="video">仅视频</option>
         </select>
         <select
@@ -191,6 +217,11 @@ export function WorkLibrary({
                   performance={settings?.performance ?? 'auto'}
                   selected={activeId === j.id}
                   featured={filtered.length === 1}
+                  comparison={compareIds === null ? undefined : {
+                    checked: compareIds.includes(j.id),
+                    disabled: !comparable(j) || (pair.length === 2 && !compareIds.includes(j.id)),
+                    toggle: () => toggleComparison(j.id),
+                  }}
                   choose={() => select(j.id)}
                   inspect={() => inspect(j)}
                   makeVideo={() => void attempt(() => makeVideo(j))}
@@ -255,6 +286,7 @@ export function WorkLibrary({
           close={() => setBatchOpen(false)}
         />
       )}
+      {comparing && pair.length === 2 && <WorkComparison pair={[pair[0], pair[1]]} close={() => setComparing(false)} />}
     </section>
   )
 }

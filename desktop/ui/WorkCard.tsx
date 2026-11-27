@@ -3,12 +3,14 @@ import { createPortal } from 'react-dom'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { siteTemplate, statusLabels, type JobView, type PerformanceMode } from '../shared'
 import { LibraryThumbnail } from './LibraryThumbnail'
+import { gifTiming } from './gifInfo'
 
 interface Props {
   performance: PerformanceMode
   job: JobView
   selected: boolean
   featured: boolean
+  comparison?: { checked: boolean; disabled: boolean; toggle: () => void }
   choose: () => void
   inspect: () => void
   makeVideo: () => void
@@ -16,7 +18,7 @@ interface Props {
   copyImage: (link: boolean) => void
 }
 
-export function WorkCard({ job, selected, featured, choose, inspect, makeVideo, saveOriginal, copyImage, performance }: Props) {
+export function WorkCard({ job, selected, featured, comparison, choose, inspect, makeVideo, saveOriginal, copyImage, performance }: Props) {
   const card = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [failedPreview, setFailedPreview] = useState<string>()
@@ -66,13 +68,14 @@ export function WorkCard({ job, selected, featured, choose, inspect, makeVideo, 
     e.preventDefault()
     openMenu(e.clientX, e.clientY)
   }}>
-    <button ref={card} className={'card' + (selected ? ' selected' : '')}
-      aria-pressed={selected}
+    <button ref={card} className={'card' + ((comparison?.checked ?? selected) ? ' selected' : '')}
+      aria-pressed={comparison?.checked ?? selected}
       aria-haspopup="menu"
       aria-expanded={!!menu}
-      onClick={choose} onDoubleClick={inspect}
+      onClick={comparison ? comparison.toggle : choose} onDoubleClick={comparison ? undefined : inspect}
+      disabled={comparison?.disabled}
       onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); inspect() }
+        if (e.key === 'Enter' && !comparison) { e.preventDefault(); inspect() }
         else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
           e.preventDefault()
           const rect = e.currentTarget.getBoundingClientRect()
@@ -87,10 +90,13 @@ export function WorkCard({ job, selected, featured, choose, inspect, makeVideo, 
       <b>{title}</b>
       <span className="work-card-meta">
         <em>{statusLabels[job.status] || job.status}</em>
+        {job.gif && <small>GIF · {gifTiming(job.gif.frames, job.gif.durationMs, job.gif.frameMs == null)}</small>}
         <small>{new Date(job.created).toLocaleDateString()} · {siteTemplate(job.model)?.Name || job.profileName}</small>
       </span>
     </button>
-    {canUseImage && <button className="card-to-video" onClick={makeVideo} title="以这张图片作为视频首帧">图生视频 <span aria-hidden="true">↗</span></button>}
+    {comparison ? <label className="compare-pick"><input type="checkbox" checked={comparison.checked}
+      disabled={comparison.disabled} onChange={comparison.toggle} aria-label={'选择对比作品 ' + title} />对比</label>
+      : canUseImage && <button className="card-to-video" onClick={makeVideo} title="以这张图片作为视频首帧">图生视频 <span aria-hidden="true">↗</span></button>}
     {menu && createPortal(<div className="work-menu" role="menu" aria-label={job.kind === 'image' ? '图片作品操作' : '视频作品操作'} ref={popup}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation() }}
       onKeyDown={e => {

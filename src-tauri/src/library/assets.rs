@@ -4,6 +4,14 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 impl Store {
+    pub(crate) fn read_job_gif(&self, job: &Job) -> Option<crate::media::gif::GifInfo> {
+        let name = Path::new(job.file_name.as_deref()?);
+        if !crate::media::gif::is_gif(name) {
+            return None;
+        }
+        crate::media::gif::GifInfo::read(&self.original(job).ok()?).ok()
+    }
+
     pub fn media(&self, j: &Job) -> Option<PathBuf> {
         let name = j.file_name.as_ref()?;
         if name.contains(['/', '\\'])

@@ -48,6 +48,7 @@ pub(crate) async fn export_rendered(
         width: header("x-width")?.parse().map_err(|_| "宽度无效")?,
         height: header("x-height")?.parse().map_err(|_| "高度无效")?,
         fit: header("x-fit")?.into(),
+        format: export::ResizeFormat::Png,
     };
     let choose = header("x-choose")? == "1";
     let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
@@ -75,10 +76,11 @@ async fn export_selected(
         let name = if let Some(spec) = &resize {
             spec.validate()?;
             format!(
-                "{}-{}x{}.png",
+                "{}-{}x{}.{}",
                 file.file_stem().unwrap_or_default().to_string_lossy(),
                 spec.width,
-                spec.height
+                spec.height,
+                spec.extension(&file)?
             )
         } else {
             file.file_name()

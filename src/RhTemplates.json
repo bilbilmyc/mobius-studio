@@ -202,7 +202,7 @@
     "Name": "视频去字幕",
     "Video": true,
     "Text": null,
-    "Hint": "上传 1 个视频；按输入视频真实时长计费，每秒 0.1 元。",
+    "Hint": "",
     "PerSecond": true,
     "Rate": 0.1,
     "FastRate": 0.1,

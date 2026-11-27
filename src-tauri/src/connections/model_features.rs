@@ -90,10 +90,30 @@ pub fn get_model_features(s: Core, profile_id: String, model: String) -> Result<
     } else {
         Default::default()
     };
-    let tested=s.store.jobs()?.into_iter().filter(|j|j.profile_id==p.id&&j.base_url==p.base_url&&j.model==model&&j.status=="done"&&(j.native_count.is_none()||j.candidate_ids.first()==Some(&j.id))&&j.detail!="项目备份中的历史记录。")
-        .take(12).map(|j|json!({"size":j.size,"references":j.assets.len(),"mode":j.settings.get("mode"),"mask":j.mask.is_some(),"results":j.received_count.unwrap_or(1),"at":j.time()})).collect::<Vec<_>>();
+    let mut tested = Vec::new();
+    let mut verified_gif = None;
+    for j in s.store.jobs()?.into_iter().filter(|j| {
+        j.profile_id == p.id
+            && j.base_url == p.base_url
+            && j.model == model
+            && j.status == "done"
+            && (j.native_count.is_none() || j.candidate_ids.first() == Some(&j.id))
+            && j.detail != "项目备份中的历史记录。"
+    }) {
+        let gif = j.gif.clone().or_else(|| s.store.read_job_gif(&j));
+        if verified_gif.is_none() {
+            verified_gif = gif.as_ref().filter(|g| g.frames > 1).cloned();
+        }
+        if tested.len() < 12 {
+            tested.push(json!({"size":j.size,"references":j.assets.len(),"mode":j.settings.get("mode"),
+                "mask":j.mask.is_some(),"results":j.received_count.unwrap_or(1),"at":j.time(),"gif":gif}));
+        }
+        if tested.len() == 12 && verified_gif.is_some() {
+            break;
+        }
+    }
     Ok(
-        json!({"declared":s.store.features(&p,&model)?,"listed":dir.get(&p.base_url).is_some_and(|v|v.contains(&model)),"tested":tested}),
+        json!({"declared":s.store.features(&p,&model)?,"listed":dir.get(&p.base_url).is_some_and(|v|v.contains(&model)),"tested":tested,"verifiedGif":verified_gif}),
     )
 }
 #[tauri::command]

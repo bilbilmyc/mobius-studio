@@ -38,6 +38,26 @@ pub(crate) fn create_script(s: Core, story: screenplay::Screenplay) -> Result<sc
 }
 
 #[tauri::command]
+pub(crate) async fn list_free_drafts(s: Core<'_>) -> Result<Vec<shot_drafts::FreeDraft>> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.store.free_drafts())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn save_free_draft(
+    s: Core<'_>,
+    draft: shot_drafts::FreeDraft,
+    picks: Vec<Picked>,
+) -> Result<()> {
+    let core = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.store.save_free_draft(draft, picks))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub(crate) async fn list_shot_drafts(s: Core<'_>) -> Result<Vec<shot_drafts::ShotDraft>> {
     let core = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || core.store.shot_drafts())

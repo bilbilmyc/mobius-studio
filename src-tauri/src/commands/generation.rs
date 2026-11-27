@@ -19,6 +19,7 @@ fn view(app: &AppHandle, s: &Studio, j: &Job, labels: &mut ShotLabels) -> Value 
         let _ = app.asset_protocol_scope().allow_file(p);
     }
     let mut view = j.view(file.as_ref().and_then(|p| p.to_str()));
+    view["gif"] = json!(j.gif.clone().or_else(|| s.store.read_job_gif(j)));
     view["estimatedCny"] = json!(batches::estimate(j));
     if s.group_file(&j.id).is_file() {
         view["hasResultUrl"] = json!(true);

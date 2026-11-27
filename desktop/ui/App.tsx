@@ -9,6 +9,7 @@ import './workspace.css'
 import orbit from '../../src/orbit.png'
 import {
   defaultConfig,
+  gifParameters,
   modeLabels,
   officialModes,
   relaySlots,
@@ -22,7 +23,6 @@ import {
   displaySize,
   serviceRoutes,
   presets,
-  quote,
   siteBase,
   siteTemplate,
   slots,
@@ -48,11 +48,11 @@ import {
 import { ExpandableText, Modal } from './Editor'
 import { ImageExport } from './ImageExport'
 import { OutputSpecs, type MediaMetadata } from './MediaDelivery'
+import { gifTiming } from './gifInfo'
 import { requestedAudio } from './outputSpecs'
 import { ParameterField } from './ProtocolSettings'
 import { ConnectionEditor } from './ConnectionEditor'
 import { draftSubmission } from './draftSubmission'
-import { TaskAccounting } from './TaskAccounting'
 import { ModelFeatures, useFeatures } from './ModelFeatures'
 import { MaskEditor } from './MaskEditor'
 import { CandidateGallery } from './CandidateGallery'
@@ -212,7 +212,9 @@ function App() {
   const id = profile?.Id ?? '@site',
     proto = profile?.ProtocolId ?? (kind === 'image' ? 'rh-image' : 'rh-video'),
     native = isSite(proto)
-  const featureRecord=useFeatures(!native?profile?.Id:undefined,selectedModel)
+  const completedModelResults = profile && jobs.filter(j => j.status === 'done' && j.profileId === profile.Id
+    && j.model === selectedModel && j.base === profile.BaseUrl).length
+  const featureRecord = useFeatures(!native ? profile?.Id : undefined, selectedModel, completedModelResults)
   const features = featureRecord.e?.declared ?? data?.modelFeatures?.[[id, profile?.BaseUrl, selectedModel].join('|')]
   const currentTemplate =
       siteTemplate(composer.templates[id] ?? '') ?? defaultTemplate(kind),
@@ -371,11 +373,20 @@ function App() {
   const count=kind==='image'&&!peer?draft.count??1:1
   const nativeMulti=count>1 && ['openai-image','wan-image'].includes(proto) && (features?.multi??1)>=count
   const mask=mode==='i2i'?draft.mask:undefined
+  const gif = proto === 'openai-image' && draft.config.output_format === 'gif'
+  const gifFrames = Number(draft.config.frame_count ?? gifParameters[0].default)
+  const gifDelay = Number(draft.config.frame_duration_ms ?? gifParameters[1].default)
+  const invalidGifField = gif && gifParameters.find(field => {
+    const value = draft.config[field.key] ?? field.default
+    return typeof value !== 'number' || !Number.isInteger(value) || value < field.min || value > field.max
+  })
   const mismatches=[
     features?.sizes.length&&!features.sizes.includes(draft.size)?'尺寸 '+draft.size+' 不适用于此模型。':'',
     features?.maxImages!=null&&assets.filter(a=>a.kind==='image').length>features.maxImages?'参考图超过此模型上限，请移除多余图片。':'',
     features?.firstLast===false&&mode==='first_last'?'此模型不支持首尾帧，请调整创作方式。':'',
     mask&&(!features?.mask||proto!=='openai-image'||peer)?'此遮罩仅适用于已声明支持的单模型图片编辑，请调整模型或移除遮罩。':'',
+    gif && mask ? 'GIF 动图不支持遮罩，请先移除遮罩。' : '',
+    invalidGifField ? `${invalidGifField.label}须为 ${invalidGifField.min}–${invalidGifField.max} 之间的整数。` : '',
   ].filter(Boolean)
   const mediaAction = count>1?'生成 '+count+' 张候选':peer ? '用两个模型生成' : kind === 'video' ? '生成视频' : '生成图片'
   const generationMode = hasPrompt ? composer.generationOptimization : undefined
@@ -788,7 +799,10 @@ function App() {
           imported={async()=>{await workspace.reload();await refresh()}}
           revision={scriptRevision} comparisons={comparisons} compare={compare}
           beforeEdit={workspace.flush} edited={workspace.syncScript} />}
-        {page === 'create' ? (
+        {page === 'create' && !workspace.ready ? <div className="empty" role="status">
+          {workspace.loadError || '正在读取创作草稿…'}
+          {workspace.loadError && <button onClick={() => void workspace.loadDrafts()}>重新读取草稿</button>}
+        </div> : page === 'create' ? (
           <div className="work">
             <section className="canvas-col">
               <div className="canvas" ref={canvas} data-kind={kind}>
@@ -882,9 +896,8 @@ function App() {
                     : frameUrl ? '填写镜头运动或画面变化，确认参数后即可生成视频。' : example[kind]}
                 </p>
                 {!!job?.candidateIds?.length&&<CandidateGallery ids={job.candidateIds} jobs={jobs} inspect={inspect}/>}
-                {job&&<TaskAccounting key={job.id} job={job}/>}
                 {job?.sourceJob&&<small>素材来源 · {job.sourceJob}</small>}
-                {job?.file && <OutputSpecs key={job.id} job={job} metadata={metadata?.id === job.id ? metadata : undefined} />}
+                {job?.file && <OutputSpecs key={'specs-' + job.id} job={job} metadata={metadata?.id === job.id ? metadata : undefined} />}
                 {job && (
                   <CloudSave job={job} settings={integrations} configure={() => settingsPage('storage')} report={say} />
                 )}
@@ -1070,6 +1083,7 @@ function App() {
                     workspace.select(item.kind, item.shot)
                     setKind(item.kind); show('', item.kind); pageTo('create')
                   }}>继续上次分镜 · {workspace.latest.shot.label}</button>}
+                {!shot && workspace.status === '草稿保存失败' && <button onClick={() => void attempt(workspace.flush)}>重试保存自由创作草稿</button>}
                 {hasPrompt && (
                   <ExpandableText
                     id="prompt" label="提示词" autoGrow
@@ -1232,6 +1246,34 @@ function App() {
                           </select>
                         </label>
                       )}
+                      {proto === 'openai-image' && (
+                        <label>
+                          输出格式
+                          <select
+                            aria-label="输出格式"
+                            value={String(draft.config.output_format ?? '')}
+                            onChange={e => updateConfig({ output_format: e.target.value })}
+                          >
+                            <option value="">静态图片（模型默认）</option>
+                            <option value="gif">GIF 动图</option>
+                          </select>
+                        </label>
+                      )}
+                      {gif && gifParameters.map(field => (
+                        <label key={field.key}>
+                          {field.label}
+                          <input
+                            type="number" min={field.min} max={field.max} step={1}
+                            value={String(draft.config[field.key] ?? field.default)}
+                            onChange={e => updateConfig({ [field.key]: e.target.value === '' ? '' : Number(e.target.value) })}
+                          />
+                        </label>
+                      ))}
+                      {gif && <div className="gif-preset">
+                        <button type="button" aria-pressed={gifFrames === 16 && gifDelay === 40}
+                          onClick={() => updateConfig({ frame_count: 16, frame_duration_ms: 40 })}>流畅预设</button>
+                        {!invalidGifField && <small>{gifTiming(gifFrames, gifFrames * gifDelay)}</small>}
+                      </div>}
                       {kind === 'video' && uses('seconds') && (
                         <label>
                           时长（秒）
@@ -1310,9 +1352,13 @@ function App() {
                   />
                 ))}
                 {profile&&proto==='comfy-image'&&<ComfyWorkflow key={dk} profileId={id} model={selectedModel!} changed={enabled=>setGraphKey(enabled?dk:'')}/>}
-                {proto==='openai-image'&&mode==='i2i'&&assets[0]&&(features?.mask||draft.mask)&&<MaskEditor image={assets[0]} mask={draft.mask} save={m=>update({mask:m})}/>}
+                {proto === 'openai-image' && mode === 'i2i' && assets[0] && (
+                  gif
+                    ? mask && <button onClick={() => update({ mask: undefined })}>移除遮罩</button>
+                    : (features?.mask || mask) && <MaskEditor image={assets[0]} mask={mask} save={m => update({ mask: m })} />
+                )}
                 {kind==='image'&&!peer&&<label>同模型候选数<select value={count} onChange={e=>update({count:Number(e.target.value)})}>{[1,2,4].map(n=><option key={n} value={n}>{n} 张</option>)}</select></label>}
-                {count>1&&<p>{nativeMulti?'1 次生成请求，服务商返回多张结果':count+' 次独立生成请求'} · {native?'合计预估 ¥'+(count*Number(quote(currentTemplate,draft.config,draft.priority).split('¥')[1])).toFixed(2):'费用由连接的服务决定'}</p>}
+                {count > 1 && <p>{nativeMulti ? '1 次生成请求，服务商返回多张结果' : count + ' 次独立生成请求'}</p>}
                 {customGraph&&<small>尺寸、采样与种子由已导入的工作流决定。</small>}
                 {proto === 'comfy-image' && !customGraph && <ComfyControls config={draft.config} imageInput={mode === 'i2i'}
                   change={updateConfig} />}
@@ -1350,15 +1396,13 @@ function App() {
                   </div>
                   <button className="link" onClick={() => inspect(recent, true)}>{jobAction(recent)}</button>
                 </div>}
-                <small>
-                  {peer && <>2 个生成任务<br />当前模型　{native ? currentTemplate.Name : selectedModel} · {comparisonSpecs(draft, native)} · </>}
-                  {native
-                    ? quote(currentTemplate, draft.config, draft.priority)
-                    : proto === 'comfy-image' ? '由所连 ComfyUI 运行'
-                    : '由所选服务商结算'}
-                  {peer && <><br />对比模型　{peer.name} · {comparisonSpecs(peer.parameters, !!peer.template)} · {peer.price}
-                    {comparisonSpecs(draft, native) !== comparisonSpecs(peer.parameters, !!peer.template) && <><br />两侧参数不同，请确认后生成。</>}</>}
-                </small>
+                {peer && <small>
+                  2 个生成任务<br />
+                  当前模型　{native ? currentTemplate.Name : selectedModel} · {comparisonSpecs(draft, native)}<br />
+                  对比模型　{peer.name} · {comparisonSpecs(peer.parameters, !!peer.template)}
+                  {comparisonSpecs(draft, native) !== comparisonSpecs(peer.parameters, !!peer.template) && <><br />两侧参数不同，请确认后生成。</>}
+                </small>}
+                {!peer && proto === 'comfy-image' && <small>由所连 ComfyUI 运行</small>}
                 {submitIssue?.scope === promptScope && <ServiceError message={submitIssue.message}
                   configure={() => edit({ official: id === '@site', profile: profile ?? official })} />}
                 {hasPrompt && <label className="generation-prompt-mode">生成前优化
