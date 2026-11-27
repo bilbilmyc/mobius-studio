@@ -43,7 +43,11 @@ impl Store {
         Ok(p)
     }
     pub fn profile_view(&self, p: &Profile) -> Value {
-        json!({"Id":p.id,"ServiceId":p.service_id(),"Name":p.name,"ServiceGroup":p.service_group,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
+        let model_sizes: std::collections::BTreeMap<_, _> = std::iter::once(&p.model)
+            .chain(&p.models)
+            .filter_map(|model| p.image_size_presets(model).map(|sizes| (model, sizes)))
+            .collect();
+        json!({"Id":p.id,"ServiceId":p.service_id(),"Name":p.name,"ServiceGroup":p.service_group,"ProtocolId":p.protocol_id,"BaseUrl":p.base_url,"Model":p.model,"Models":p.models,"ModelSizePresets":model_sizes,"Relay":p.relay,"Controls":p.controls,"hasKey":self.vault.has(p,&p.base_url)})
     }
     pub fn edit(&self, mut e: Edit) -> Result<String> {
         let _lock = self.gate.lock().unwrap();

@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 export const legacyRelay = {
   Id: '1'.repeat(32), Name: '示例中转站', ProtocolId: 'relay-image',
   BaseUrl: 'https://relay.example/v1', Model: 'gpt-image-2-azure', Models: ['image-fast'],
-  Relay: { auth: 'bearer', submit: 'images/generations', body: '{}', url: 'data.0.url', sizes: ['1024x1024'] },
+  Relay: { auth: 'bearer', submit: 'images/generations', body: '{}', url: 'data.0.url', base64: 'data.0.b64_json',
+    sizes: ['1024x1024', '1536x1024', '1024x1536'] },
 }
 
 export async function exerciseConnectionGroups({ page, restart, shot, base }) {
@@ -82,7 +83,7 @@ export async function exerciseConnectionGroups({ page, restart, shot, base }) {
   await dialog().getByLabel('服务根地址').fill(base)
   await dialog().getByLabel('服务分组').selectOption('relay')
   await dialog().getByLabel('API Key').fill('local-relay-test')
-  await dialog().getByLabel('请求体 JSON', {exact: false}).first().fill('{"model":"{{model}}","prompt":"{{prompt}}"}')
+  await dialog().getByLabel('请求体 JSON', {exact: false}).first().fill('{"model":"{{model}}","prompt":"{{prompt}}","size":"{{size}}"}')
   await save()
   const quickAdd = async () => {
     await dialog().getByRole('button', {name: '添加模型', exact: true}).click()
@@ -117,9 +118,25 @@ export async function exerciseConnectionGroups({ page, restart, shot, base }) {
       assert.equal(await picker.locator('optgroup').count(), 2)
     }
     await picker.selectOption({label:model})
+    if (tab === '图片') {
+      const sizes = page.getByLabel('输出尺寸或画幅')
+      assert.equal(await sizes.inputValue(), '1024x1024')
+      assert.deepEqual(await sizes.locator('option').allTextContents().then(labels => labels.filter(label => /^[24]K/.test(label))),
+        ['2K 方图 · 2048 × 2048', '2K 横图 · 2048 × 1152', '2K 竖图 · 1152 × 2048', '4K 横图 · 3840 × 2160', '4K 竖图 · 2160 × 3840'])
+      await sizes.selectOption('2048x2048')
+      await page.locator('#prompt').fill('2K')
+      await button('生成图片').click()
+      await page.waitForFunction(async () => (await window.studio.state()).jobs.some(j => j.size === '2048x2048' && j.status === 'done'))
+      await sizes.selectOption('3840x2160')
+      await picker.selectOption({label: 'image-fast'})
+      assert.equal(await sizes.locator('option[value="3840x2160"]').count(), 0)
+      assert.equal(await sizes.inputValue(), '1024x1024')
+      await picker.selectOption({label:model})
+      assert.equal(await sizes.inputValue(), '3840x2160')
+    }
     await page.locator('#prompt').fill(model)
     await button('生成' + tab).click()
-    await page.waitForFunction(async name => (await window.studio.state()).jobs.some(j => j.model === name && j.status === 'done'), model)
+    await page.waitForFunction(async name => (await window.studio.state()).jobs.some(j => j.model === name && j.prompt === name && j.status === 'done'), model)
   }
   await button('设置').click()
   await legacy().getByRole('button', {name:'移除 OpenAI 兼容视频'}).click()

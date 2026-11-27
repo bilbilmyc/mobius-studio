@@ -164,6 +164,39 @@ fn connection_models_stay_scoped_and_jobs_keep_the_selected_model() {
 }
 
 #[test]
+fn high_resolution_sizes_follow_model_and_connection_limits() {
+    let mut profile = Profile {
+        protocol_id: "openai-image".into(),
+        ..Default::default()
+    };
+    let sizes = profile.image_size_presets("gpt-image-2").unwrap();
+    assert_eq!(sizes[0], "1024x1024");
+    assert!(sizes.iter().any(|s| s == "auto"));
+    assert!(sizes.iter().any(|s| s == "2160x3840"));
+    assert!(profile.image_size_presets("gpt-image-1").is_none());
+    profile.controls = Some(Controls {
+        sizes: vec!["1024x1024".into()],
+        ..Default::default()
+    });
+    assert!(profile.image_size_presets("gpt-image-2").is_none());
+
+    profile.protocol_id = "relay-image".into();
+    let legacy = ["1024x1024", "1536x1024", "1024x1536"]
+        .map(str::to_owned)
+        .to_vec();
+    profile.relay = Some(Relay {
+        sizes: legacy.clone(),
+        ..Default::default()
+    });
+    let sizes = profile.image_size_presets("gpt-image-2-azure").unwrap();
+    assert!(sizes.starts_with(&legacy));
+    assert!(!sizes.iter().any(|s| s == "auto"));
+    assert!(sizes.iter().any(|s| s == "3840x2160"));
+    profile.relay.as_mut().unwrap().sizes.truncate(1);
+    assert!(profile.image_size_presets("gpt-image-2-azure").is_none());
+}
+
+#[test]
 fn validates_routes_and_legacy_files() {
     let base = "https://relay.example/v1";
     assert_eq!(

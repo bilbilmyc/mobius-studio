@@ -105,6 +105,12 @@ impl Studio {
             return Err("请先连接此官网的 OpenAPI Key。".into());
         }
         let features = self.store.features(&p, &p.model)?;
+        let model_sizes = features
+            .as_ref()
+            .map(|f| &f.sizes)
+            .filter(|sizes| !sizes.is_empty())
+            .cloned()
+            .or_else(|| p.image_size_presets(&p.model));
         let mask = i
             .mask
             .map(|m| {
@@ -185,13 +191,11 @@ impl Studio {
             }
             crate::connections::model_features::check(features.as_ref(), &j)?;
             let mut controls = p.controls.unwrap_or_default();
-            if let Some(f) = &features {
-                if !f.sizes.is_empty() {
-                    controls.sizes = f.sizes.clone();
-                    if let Some(r) = &mut j.relay {
-                        r.sizes = f.sizes.clone()
-                    }
+            if let Some(sizes) = model_sizes {
+                if let Some(r) = &mut j.relay {
+                    r.sizes = sizes.clone();
                 }
+                controls.sizes = sizes;
             }
             crate::generation::creation::prepare_with_limit(
                 &mut j,

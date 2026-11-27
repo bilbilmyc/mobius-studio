@@ -1,6 +1,13 @@
 {
   "comfy-image":{"title":"ComfyUI · 本地图片","base":"http://127.0.0.1:8188","model":"","modes":["t2i","i2i"],"sizes":["512x512","768x768","1024x1024","1216x832","832x1216"],"seconds":[],"resolutions":[],"maxImages":1},
-  "openai-image":{"title":"OpenAI 兼容图片","base":"","model":"","modes":["t2i","i2i"],"sizes":["1024x1024","1536x1024","1024x1536","auto"],"seconds":[],"resolutions":[],"maxImages":16},
+  "openai-image":{"title":"OpenAI 兼容图片","base":"","model":"","modes":["t2i","i2i"],"sizes":["1024x1024","1536x1024","1024x1536","auto"],"seconds":[],"resolutions":[],"maxImages":16,
+    "highResolutionSizes":[
+      {"size":"2048x2048","label":"2K 方图"},
+      {"size":"2048x1152","label":"2K 横图"},
+      {"size":"1152x2048","label":"2K 竖图"},
+      {"size":"3840x2160","label":"4K 横图"},
+      {"size":"2160x3840","label":"4K 竖图"}
+    ]},
   "openai-video":{"title":"OpenAI 兼容视频","base":"","model":"","modes":["t2v","first_frame"],"sizes":["1280x720","720x1280","1792x1024","1024x1792"],"seconds":[4,8,12],"resolutions":[]},
   "wan-image":{"title":"万相 2.7 · 图片生成与编辑","base":"","model":"wan2.7-image","modes":["t2i","i2i"],"sizes":["2048x2048","2304x1728","1728x2304","1024x1024"],"seconds":[],"resolutions":[],"maxImages":9},
   "wan-video":{"title":"万相 · 文生视频","base":"","model":"wan2.6-t2v","modes":["t2v"],"sizes":["1280x720","720x1280","960x960","1920x1080","1080x1920"],"seconds":[5,10,15],"resolutions":[]},

@@ -18,6 +18,8 @@ import {
   isSite,
   mediaKind,
   profileModels,
+  profileSizes,
+  displaySize,
   serviceRoutes,
   presets,
   quote,
@@ -208,14 +210,13 @@ function App() {
   const id = profile?.Id ?? '@site',
     proto = profile?.ProtocolId ?? (kind === 'image' ? 'rh-image' : 'rh-video'),
     native = isSite(proto)
-  const featureRecord=useFeatures(!native?profile?.Id:undefined,selectedModel), features=featureRecord.e?.declared
+  const featureRecord=useFeatures(!native?profile?.Id:undefined,selectedModel)
+  const features = featureRecord.e?.declared ?? data?.modelFeatures?.[[id, profile?.BaseUrl, selectedModel].join('|')]
   const currentTemplate =
       siteTemplate(composer.templates[id] ?? '') ?? defaultTemplate(kind),
     preset = presets[proto],
     controls = profile?.Controls,
-    sizes =
-      features?.sizes.length ? features.sizes : profile?.Relay?.sizes ??
-      (controls?.sizes?.length ? controls.sizes : preset.sizes),
+    sizes = profile ? profileSizes(profile, selectedModel!, features?.sizes) : preset.sizes,
     seconds =
       profile?.Relay?.seconds ??
       (controls?.seconds?.length ? controls.seconds : preset.seconds),
@@ -726,12 +727,6 @@ function App() {
   const customPixels = !!controls?.customSize && !fixedRatio
   const listedSize = sizes.includes(draft.size)
   const manualSize = customPixels && (draft.manualSize ?? !listedSize)
-  const displaySize = (s: string) =>
-    s === 'adaptive'
-      ? '跟随首帧'
-      : s === 'auto'
-        ? '自动'
-        : s.replace(/(\d+)x(\d+)/, '$1 × $2')
   const previewUrl =
     job?.file && job.mediaPath
       ? (job.mediaUrl ?? convertFileSrc(job.mediaPath))
@@ -1036,8 +1031,12 @@ function App() {
                     <select aria-label="生成模型" value={staleModel ? composer.models[profile.Id] : selectedModel} onChange={(e) => {
                       const value = e.target.value
                       const nextKey=JSON.stringify([id,kind,profile.BaseUrl,value])
+                      const declared = data?.modelFeatures?.[[id, profile.BaseUrl, value].join('|')]?.sizes
+                      const options = profileSizes(profile, value, declared)
+                      const keepSize = options.includes(draft.size) ||
+                        (controls?.customSize && !declared?.length && /^\d+x\d+$/.test(draft.size))
                       change(old => ({ ...old, compare: '', models: { ...old.models, [id]: value },
-                        variants:{...old.variants,[nextKey]:old.variants[nextKey]??{...draft}} }))
+                        variants:{...old.variants,[nextKey]:old.variants[nextKey]??{...draft, size:keepSize ? draft.size : options[0]}} }))
                       if (!foregroundActive && !pendingPreview) show('')
                     }}>
                       {staleModel && <option disabled value={composer.models[profile.Id]}>原模型已移除，请重新选择</option>}
@@ -1150,7 +1149,7 @@ function App() {
                             >
                               {sizes.map((s) => (
                                 <option key={s} value={s}>
-                                  {displaySize(s)}
+                                  {displaySize(s, proto)}
                                 </option>
                               ))}
                               {customPixels && (

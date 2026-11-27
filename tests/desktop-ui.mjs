@@ -268,7 +268,9 @@ async function run() {
       if (req.url === '/v1/videos/clip') return json(res, {status: 'completed'})
       if (req.url === '/v1/videos/clip/content') return res.end(video)
       if (req.url === '/v1/images/generations' && req.method === 'POST') {
-        assert.equal(JSON.parse(bytes).model, legacyRelay.Model)
+        const body = JSON.parse(bytes)
+        assert.equal(body.model, legacyRelay.Model)
+        assert.equal(body.size, body.prompt === '2K' ? '2048x2048' : '3840x2160')
         return json(res, {data: [{b64_json: png.toString('base64')}]})
       }
       assert.fail('Unexpected fixture request')

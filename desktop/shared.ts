@@ -69,8 +69,7 @@ export interface Preset {
   sizes: string[]
   seconds: number[]
 }
-const landscape = ['16:9', '9:16', '1:1'],
-  pixels = ['1024x1024', '1536x1024', '1024x1536']
+const landscape = ['16:9', '9:16', '1:1']
 export const presets: Record<Protocol, Preset> = {
   'rh-image': {
     title: '官网图片模板',
@@ -248,7 +247,7 @@ export function defaultRelay(kind: MediaKind): RelayMap {
     success: 'completed,succeeded,success',
     failure: 'failed,canceled,cancelled,expired',
     waiting: 'queued,pending,processing,running,in_progress',
-    sizes: video ? [...landscape] : [...pixels],
+    sizes: [...generationPresets[video ? 'relay-video' : 'relay-image'].sizes],
     seconds: video ? [5, 10, 15] : [],
   }
 }
@@ -305,6 +304,22 @@ export interface Profile {
 }
 export type ProfileView = Omit<Profile, 'Keys' | 'Secrets'> & {
   hasKey: boolean
+  ModelSizePresets?: Record<string, string[]>
+}
+export function profileSizes(p: ProfileView, model: string, declared?: string[]) {
+  if (declared?.length) return declared
+  return p.ModelSizePresets?.[model] ?? p.Relay?.sizes ??
+    (p.Controls?.sizes.length ? p.Controls.sizes : presets[p.ProtocolId].sizes)
+}
+export function displaySize(size: string, protocol: Protocol) {
+  if (size === 'adaptive') return '跟随首帧'
+  if (size === 'auto') return '自动'
+  const pixels = size.replace(/(\d+)x(\d+)/, '$1 × $2')
+  if (protocol === 'relay-image' || protocol === 'openai-image') {
+    const option = generationPresets['openai-image'].highResolutionSizes.find(o => o.size === size)
+    if (option) return option.label + ' · ' + pixels
+  }
+  return pixels
 }
 export const profileModels = (p: ProfileView) => [p.Model, ...(p.Models ?? [])]
 export function serviceRoutes(profiles: ProfileView[]) {

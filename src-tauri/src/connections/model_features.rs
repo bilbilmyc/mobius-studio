@@ -2,6 +2,7 @@ use crate::{
     app::Core,
     connections::catalog::Catalog,
     domain::{Job, Profile, Result},
+    generation::creation::preset,
     storage::files::{read, save},
     storage::store::Store,
 };
@@ -17,6 +18,42 @@ pub struct Features {
     pub first_last: Option<bool>,
     pub mask: Option<bool>,
     pub multi: Option<usize>,
+}
+impl Profile {
+    pub(crate) fn image_size_presets(&self, model: &str) -> Option<Vec<String>> {
+        let configured = match self.protocol_id.as_str() {
+            "openai-image" => self.controls.as_ref().map(|c| &c.sizes),
+            "relay-image" => self.relay.as_ref().map(|r| &r.sizes),
+            _ => return None,
+        };
+        let model = model.to_ascii_lowercase();
+        if !["gpt-image-2", "gpt-image-2.5", "gpt-image-2.6"]
+            .iter()
+            .any(|name| {
+                model == *name || model.strip_prefix(name).is_some_and(|s| s.starts_with('-'))
+            })
+        {
+            return None;
+        }
+        let standard = preset(&self.protocol_id)["sizes"].as_array()?;
+        // Older custom relay profiles store the protocol defaults as an explicit list.
+        if let Some(sizes) = configured.filter(|s| !s.is_empty()) {
+            if self.protocol_id != "relay-image" || !standard.iter().eq(sizes.iter()) {
+                return None;
+            }
+        }
+        let mut sizes: Vec<String> = standard
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        sizes.extend(
+            preset("openai-image")["highResolutionSizes"]
+                .as_array()?
+                .iter()
+                .filter_map(|entry| entry["size"].as_str().map(str::to_owned)),
+        );
+        Some(sizes)
+    }
 }
 impl Store {
     pub(crate) fn feature_map(&self) -> Result<BTreeMap<String, Features>> {
