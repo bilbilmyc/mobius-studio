@@ -127,7 +127,9 @@ async function start() {
   })
   child.stderr.on('data', chunk => { if (chunk.toString().includes('MOBIUS_WEBVIEW_READY')) uiReady = true })
   let targets = []
-  for (let i = 0; i < 120; i++) {
+  // A cold WebView2 runtime on hosted Windows can take over 30 seconds to publish its first page.
+  const startupDeadline = Date.now() + 120_000
+  while (Date.now() < startupDeadline) {
     if (child.exitCode !== null)
       throw Error(
         'QA instance exited before providing a WebView. Close other Tauri copies first.',
@@ -138,7 +140,10 @@ async function start() {
         const port = Number(activePort.split(/\r?\n/, 1)[0])
         if (Number.isInteger(port) && port > 0 && port <= 65535) endpoint = 'http://127.0.0.1:' + port
       }
-      targets = await (await fetch(endpoint + '/json/list')).json()
+      if (endpoint) {
+        const response = await fetch(endpoint + '/json/list', { signal: AbortSignal.timeout(2000) })
+        targets = await response.json()
+      }
       if (
         targets.some(
           (t) => t.type === 'page' && t.url.includes('tauri.localhost'),
