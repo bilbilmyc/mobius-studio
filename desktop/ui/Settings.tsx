@@ -4,11 +4,12 @@ import { WriterConnections, type WriterSelection } from './WriterConnections'
 import storageProviders from '../../src/StorageProviders.json'
 import { MediaToolSettings } from './MediaToolSettings'
 import { RuntimeSettings } from './RuntimeSettings'
+import { UpdateSettings } from './UpdateSettings'
 import { PerformanceSettings } from './PerformanceSettings'
 import { DeveloperSettings } from './RequestHistory'
 import { MediaConnections, type MediaConnectionProps } from './MediaConnections'
 
-const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', performance: '性能', files: '文件与工具', developer: '开发者模式' }
+const sections = { media: '图片与视频', writer: '剧本模型', storage: '对象存储', performance: '性能', files: '文件与工具', developer: '开发者模式', updates: '软件更新' }
 export type SettingsSection = keyof typeof sections
 
 interface Props extends MediaConnectionProps, WriterSelection {
@@ -31,6 +32,7 @@ export function Settings(props: Props) {
     </nav>
     <div className={section === 'media' || section === 'writer' ? 'preferences-content media-preferences' : 'preferences-content'} key={section}>
       <h2>{sections[section]}</h2>
+      {section === 'updates' && <UpdateSettings/>}
       {section === 'media' && <MediaConnections profiles={props.profiles} official={official} edit={props.edit} remove={props.remove} addModel={props.addModel} />}
       {section === 'writer' && integrations && <WriterConnections data={integrations} reload={props.reload} editActive={props.editActiveWriter}
         selectWriter={props.selectWriter} switchingWriter={props.switchingWriter} />}

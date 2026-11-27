@@ -213,6 +213,21 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  if (process.argv.includes('--update-live')) {
+    await start()
+    const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version
+    const button = name => page.getByRole('button', { name, exact: true })
+    await button('设置').click()
+    await button('软件更新').click()
+    await page.getByText('当前版本 ' + version, { exact: true }).waitFor()
+    await button('检查更新').click()
+    const result = page.locator('.preferences-content h3[role="status"]')
+    await result.waitFor({ timeout: 30000 })
+    console.log('Installed updater:', version, await result.innerText())
+    await shot('检查更新', page.locator('.preferences-content'))
+    assert.deepEqual(errors, [])
+    return
+  }
   if (process.argv.includes('--script-progress-only')) {
     const fixture = scriptProgressFixture()
     relay = await listen(fixture.handle)

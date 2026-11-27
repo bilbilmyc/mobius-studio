@@ -181,7 +181,7 @@ export async function exerciseResponsiveLayout({ page, shot }) {
   await page.waitForFunction(() => document.activeElement?.classList.contains('writing-tools-toggle'))
   await page.setViewportSize({width:1190,height:772})
   await button('设置').click()
-  for (const section of ['图片与视频','剧本模型','对象存储','性能','文件与工具','开发者模式']) {
+  for (const section of ['图片与视频','剧本模型','对象存储','性能','文件与工具','开发者模式','软件更新']) {
     await button(section).click()
     if (['图片与视频','剧本模型'].includes(section)) {
       assert.equal(await page.getByRole('region', {name:'中转站与自定义接口', exact:true}).getByRole('article').count(), 2)

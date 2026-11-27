@@ -1,6 +1,6 @@
 {
   "$schema":"https://schema.tauri.app/config/2",
-  "productName":"莫比环","version":"2.14.3","identifier":"com.mobius.creative.studio",
+  "productName":"莫比环","version":"2.14.4","identifier":"com.mobius.creative.studio",
   "build":{"beforeDevCommand":"npm run dev","devUrl":"http://127.0.0.1:1420","beforeBuildCommand":"npm run build","frontendDist":"../.app-build/ui"},
   "app":{"windows":[{"label":"main","title":"莫比环 · 创作工作台","width":1190,"height":772,"minWidth":320,"minHeight":420,"preventOverflow":true,"center":true,"theme":"Dark","backgroundColor":"#090a0e"}],
     "security":{"csp":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost http://127.0.0.1:*; connect-src ipc: http://ipc.localhost 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'","assetProtocol":{"enable":true,"scope":[]}}},

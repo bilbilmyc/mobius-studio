@@ -36,6 +36,15 @@ pub struct Studio {
     pub poll: Duration,
 }
 impl Studio {
+    pub(crate) fn generating(&self) -> bool {
+        !self.active.lock().unwrap().is_empty()
+            || self
+                .script_runs
+                .list()
+                .iter()
+                .any(|r| r.status == crate::writer::script_runs::RunStatus::Writing)
+    }
+
     pub fn new(
         store: Store,
         notify: impl Fn(Option<&str>) + Send + Sync + 'static,

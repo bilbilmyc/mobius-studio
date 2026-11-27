@@ -1,6 +1,6 @@
 [package]
 name = "mobius-studio"
-version = "2.14.3"
+version = "2.14.4"
 edition = "2021"
 description = "莫比环本地图片与视频工作台"
 build = "build.rs"
@@ -24,6 +24,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
+semver = "1"
 image = { version="0.25", default-features=false, features= ["png", "jpeg", "webp", "gif"] }
 base64 = "0.22"
 tempfile = "3"

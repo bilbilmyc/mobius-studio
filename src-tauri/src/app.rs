@@ -30,6 +30,7 @@ pub fn run() {
     }
     let app = builder
         .manage(crate::desktop_window::WindowState::default())
+        .manage(crate::updates::Updates::default())
         .on_window_event(crate::desktop_window::on_window_event)
         .manage(writer::tool_calls::Runs::default())
         .plugin(tauri_plugin_dialog::init())
@@ -104,6 +105,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::desktop_window::runtime_info,
+            crate::updates::check_app_update,
+            crate::updates::get_app_update,
+            crate::updates::install_app_update,
+            crate::updates::open_app_releases,
             crate::desktop_window::request_quit,
             crate::desktop_window::finish_window_close,
             crate::diagnostics::open_log_folder,

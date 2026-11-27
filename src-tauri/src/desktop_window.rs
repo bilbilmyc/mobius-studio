@@ -148,10 +148,15 @@ pub(crate) fn finish_window_close(app: AppHandle, saved: bool) -> Result<()> {
         .quitting
         .swap(false, Ordering::SeqCst);
     if !saved {
+        crate::updates::discard_install(&app);
         diagnostics::entry("ERROR", "window", "草稿写入失败，已返回主窗口");
         return restore(&app);
     }
     if quitting {
+        if let Err(error) = crate::updates::launch_pending(&app) {
+            restore(&app)?;
+            return Err(error);
+        }
         app.exit(0);
     }
     Ok(())

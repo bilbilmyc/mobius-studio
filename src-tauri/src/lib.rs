@@ -11,6 +11,7 @@ mod media;
 mod projects;
 mod providers;
 mod storage;
+mod updates;
 #[cfg(test)]
 mod tests;
 mod writer;
