@@ -213,6 +213,40 @@ async function checkBackdrop(moving) {
 async function run() {
   for (const dir of ['tasks', '作品'])
     await mkdir(path.join(data, dir), { recursive: true })
+  // Run with an isolated test build whose version is below the published stable release.
+  if (process.argv.includes('--startup-update-live')) {
+    await start()
+    const notice = () => page.getByRole('region', { name: '软件更新提醒' })
+    const button = name => page.getByRole('button', { name, exact: true })
+    await notice().waitFor({timeout: 30000})
+    const latest = (await notice().getByRole('status').innerText()).match(/\d+\.\d+\.\d+/)[0]
+    await page.locator('#prompt').fill('启动检查不影响创作')
+    await shot('启动更新提醒', notice())
+    await button('稍后提醒').click()
+    await notice().waitFor({state:'hidden'})
+    assert.equal(await page.locator('#prompt').inputValue(), '启动检查不影响创作')
+    await restartNormally()
+    await notice().waitFor({timeout: 30000})
+    await button('跳过此版本').click()
+    await notice().waitFor({state:'hidden'})
+    assert.equal(JSON.parse(await readFile(path.join(data,'settings.json'), 'utf8')).skippedUpdateVersion, latest)
+    await restartNormally()
+    assert.equal(await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('check_app_update',{startup:true})), null)
+    assert.equal(await notice().count(), 0)
+    await button('设置').click()
+    await button('软件更新').click()
+    await button('检查更新').click()
+    await page.getByText('发现新版本 ' + latest, {exact:true}).waitFor({timeout:30000})
+    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('skip_app_update',{version:'0.0.1'}))
+    await restartNormally()
+    await notice().waitFor({timeout:30000})
+    await button('立即更新').click()
+    await button('退出并安装').waitFor({timeout:305000})
+    await page.getByText('更新包已通过 SHA-256 校验，可以安装。',{exact:true}).waitFor()
+    assert.deepEqual(errors, [])
+    console.log('Startup notice, later, persisted skip, manual override, later release and verified download passed:', latest)
+    return
+  }
   if (process.argv.includes('--update-live')) {
     await start()
     const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version

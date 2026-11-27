@@ -59,6 +59,7 @@ import { CandidateGallery } from './CandidateGallery'
 import { ReferenceCards } from './ReferenceCards'
 import { Assets, addAssets, frameOrder } from './Assets'
 import { Settings, type SettingsSection } from './Settings'
+import { StartupUpdateNotice, useAppUpdates } from './UpdateSettings'
 import { RequestHistory } from './RequestHistory'
 import { ScriptDesk } from './ScriptDesk'
 import { CloudSave } from './CloudSave'
@@ -113,6 +114,7 @@ const pageNames = {
 const noJobs: JobView[] = []
 const noScriptRuns: ScriptRun[] = []
 function App() {
+  const updates = useAppUpdates()
   const [notice, say] = useState('就绪'),
     [page, pageTo] = useState<Page>('create')
   const {state: data, refresh} = useStudioState(say)
@@ -777,6 +779,8 @@ function App() {
               inspectScript={run => { setOpenedScripts(true); viewScriptRun(run); pageTo('script') }} />
           </div>
         </header>
+        {(page !== 'settings' || section !== 'updates') &&
+          <StartupUpdateNotice updates={updates} openSettings={() => settingsPage('updates')}/>}
         {openedScripts && <ScriptDesk active={page === 'script'} integrations={integrations} selectWriter={selectWriter} switchingWriter={switchingWriter}
           runs={scriptRuns} viewedRun={currentScriptRun} viewRun={viewScriptRun}
           configure={() => settingsPage('writer')} usePrompt={shotPrompt} jobs={data?.jobs ?? []} inspect={inspect}
@@ -1388,7 +1392,7 @@ function App() {
             selectedId={chosen} select={choose} inspect={inspect} makeVideo={j => continueWithImage(j, 'video')}
             settings={integrations} configureStorage={() => settingsPage('storage')} report={say} attempt={attempt}/>
         ) : page === 'settings' ? (
-          <Settings section={section} select={next => { setEditActiveWriter(false); setSection(next) }} integrations={integrations} reload={loadSettings}
+          <Settings updates={updates} section={section} select={next => { setEditActiveWriter(false); setSection(next) }} integrations={integrations} reload={loadSettings}
             editActiveWriter={editActiveWriter} selectWriter={selectWriter} switchingWriter={switchingWriter}
             profiles={externals} official={official} edit={(official, profile) => edit({ official, profile })}
             addModel={(addRoutes, modelKind) => edit({ official: false, addRoutes, modelKind })}

@@ -37,6 +37,8 @@ pub enum StorageProvider {
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     pub developer_mode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped_update_version: Option<String>,
     pub performance: PerformanceMode,
     pub writer: WriterConnection,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -96,6 +98,13 @@ impl Store {
         let _guard = self.gate.lock().unwrap();
         let mut p = self.preferences()?;
         p.performance = mode;
+        save(&self.home.join("settings.json"), &p)
+    }
+
+    pub(crate) fn skip_update(&self, version: String) -> Result<()> {
+        let _guard = self.gate.lock().unwrap();
+        let mut p = self.preferences()?;
+        p.skipped_update_version = Some(version);
         save(&self.home.join("settings.json"), &p)
     }
 

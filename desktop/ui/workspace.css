@@ -1,4 +1,10 @@
 [hidden] { display: none !important; }
+.startup-update {
+  display: flex; flex: none; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px 16px; padding: 9px 14px; border: 1px solid #385464; border-radius: 10px; background: #15232c;
+}
+.startup-update > div { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.startup-update > p { flex-basis: 100%; }
 .media-switch { width: clamp(115px, 13vw, 174px); }
 .top-tools, .tasks-launcher, .task-filters, .task-actions, .latest-task {
   display: flex;

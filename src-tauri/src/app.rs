@@ -106,6 +106,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             crate::desktop_window::runtime_info,
             crate::updates::check_app_update,
+            crate::updates::skip_app_update,
             crate::updates::get_app_update,
             crate::updates::install_app_update,
             crate::updates::open_app_releases,

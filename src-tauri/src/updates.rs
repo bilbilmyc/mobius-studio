@@ -1,4 +1,4 @@
-use crate::{app::Core, domain::Result, generation::jobs::Studio};
+use crate::{app::Core, domain::Result, generation::jobs::Studio, storage::store::Store};
 use futures_util::StreamExt;
 use reqwest::Client;
 use semver::Version;
@@ -50,6 +50,18 @@ pub(crate) struct UpdateInfo {
     available: bool,
     package: Option<String>,
     install: bool,
+}
+
+impl UpdateInfo {
+    fn startup_offer(self, store: &Store) -> Result<Option<Self>> {
+        if self.available
+            && store.preferences()?.skipped_update_version.as_deref() != Some(self.latest.as_str())
+        {
+            Ok(Some(self))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 fn package_name(os: &str, arch: &str, installed: bool, version: &Version) -> Option<String> {
@@ -126,8 +138,24 @@ async fn latest(http: &Client) -> Result<(Release, UpdateInfo)> {
 }
 
 #[tauri::command]
-pub(crate) async fn check_app_update() -> Result<UpdateInfo> {
-    Ok(latest(&release_client()?).await?.1)
+pub(crate) async fn check_app_update(
+    s: Core<'_>,
+    startup: Option<bool>,
+) -> Result<Option<UpdateInfo>> {
+    let (_, info) = latest(&release_client()?).await?;
+    if startup == Some(true) {
+        return info.startup_offer(&s.store);
+    }
+    Ok(Some(info))
+}
+
+#[tauri::command]
+pub(crate) fn skip_app_update(s: Core<'_>, version: String) -> Result<()> {
+    let v = Version::parse(&version).map_err(|_| "更新版本号无效。")?;
+    if !v.pre.is_empty() || !v.build.is_empty() {
+        return Err("请使用稳定版版本号。".into());
+    }
+    s.store.skip_update(version)
 }
 
 async fn download(http: &Client, url: &str, asset: &Asset, directory: &Path) -> Result<PathBuf> {
@@ -289,6 +317,42 @@ pub(crate) fn open_app_releases(app: AppHandle) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_skip_persists_for_only_the_chosen_release() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"developerMode":true}"#,
+        )
+        .unwrap();
+        let store = Store::new(dir.path().into()).unwrap();
+        let release = |latest: &str, available: bool| UpdateInfo {
+            latest: latest.into(),
+            available,
+            package: None,
+            install: false,
+        };
+        assert!(release("2.14.5", false)
+            .startup_offer(&store)
+            .unwrap()
+            .is_none());
+        assert!(release("2.14.6", true)
+            .startup_offer(&store)
+            .unwrap()
+            .is_some());
+        store.skip_update("2.14.6".into()).unwrap();
+        let reopened = Store::new(dir.path().into()).unwrap();
+        assert!(reopened.preferences().unwrap().developer_mode);
+        assert!(release("2.14.6", true)
+            .startup_offer(&reopened)
+            .unwrap()
+            .is_none());
+        assert!(release("2.14.7", true)
+            .startup_offer(&reopened)
+            .unwrap()
+            .is_some());
+    }
 
     #[test]
     fn release_asset_matches_the_build_and_versions_compare_numerically() {
