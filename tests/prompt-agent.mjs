@@ -92,6 +92,7 @@ export async function exerciseAgent({ page, base, fixture, referenceFile, restar
   }
   await page.reload()
   await openShot('窗边的搪瓷杯')
+  await page.getByLabel('生成服务').selectOption('@site')
   await page.getByLabel('创作方式').selectOption('first_frame')
   await page.evaluate(file => {
     const pick = window.studio.pick

@@ -992,6 +992,9 @@ async function run() {
     templates,
   })
   await exerciseComfy({ page,base,done,shot,fixture:comfy })
+  const freeImageService = await service.inputValue()
+  await page.getByRole('button', { name: '视频', exact: true }).click()
+  await service.selectOption(vid)
   await exerciseWorkspace({ page, base, oldId, shot, state, mock: workspace })
   await stop()
   const oldTask = JSON.parse(await readFile(path.join(data, 'tasks', oldId + '.json'), 'utf8'))
@@ -1007,9 +1010,11 @@ async function run() {
   }
   await delay(500)
   await start()
-  assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
+  const restoredService = page.getByLabel('生成服务', { exact: true })
+  await restoredService.locator(`option[value="${freeImageService}"]:enabled`).waitFor({ state: 'attached' })
+  assert.equal(await restoredService.inputValue(), freeImageService)
   await page.getByRole('button', { name: '视频', exact: true }).click()
-  assert.equal(await page.getByLabel('生成服务').inputValue(), '@site')
+  assert.equal(await restoredService.inputValue(), vid)
   assert.equal((await state()).jobs.length, 21 + extra + previewCases.length + 2 + 120)
   for (const [, name, , , heading] of previewCases) {
     await page.getByRole('button', { name: '作品库', exact: true }).click()

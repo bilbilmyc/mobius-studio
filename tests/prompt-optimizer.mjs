@@ -78,6 +78,8 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
     ] })
   }, root)
   await page.reload()
+  await page.getByLabel('生成服务').selectOption('@site')
+  await prompt().fill('')
   await button('优化提示词').click()
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '优化原文', undefined, { timeout: 3000 })
   await button('丰富细节').click()
@@ -191,6 +193,7 @@ export async function exerciseOptimizer({ page, base, fixture, record, shot, res
   assert.ok(fixture.imageCalls.every(c => c.prompt === adopted))
   await pair.getByRole('button', { name: '关闭' }).click()
   await openScene('清晨蓝桥', '视频')
+  await page.getByLabel('生成服务').selectOption('@site')
   await page.getByLabel('创作方式').selectOption('first_last')
   for (const label of ['首帧选择本地文件', '尾帧选择本地文件']) {
     await page.evaluate(file => {

@@ -115,6 +115,7 @@ export async function exerciseTwoShots({ page, base, fixture, record, state, sho
   const reordered = await script()
   assert.deepEqual(reordered.scenes.map(s => s.id), original.scenes.map(s => s.id).reverse())
   await scene(shotNames[1]).getByRole('button', { name: '用于视频' }).click()
+  await page.getByLabel('生成服务').selectOption('@site')
   await page.getByLabel('创作方式').selectOption('first_last')
   await pick(1, '首帧选择本地文件'); await pick(0, '尾帧选择本地文件')
   await prompt().fill('蓝桥运镜')
