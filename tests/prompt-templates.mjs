@@ -295,10 +295,12 @@ export async function exerciseTemplates({ page, base, fixture, data, restart }) 
   await openEditor()
   await optimizer().getByRole('button', { name: '对话改稿' }).click()
   await chat().getByRole('button', { name: '提示词模板' }).click()
+  const templateSelect = picker().getByLabel('选择模板')
+  await templateSelect.waitFor({ state: 'visible' })
   await assertFocusIsVisible(picker().getByLabel('查找模板'))
   await page.keyboard.press('Tab') // 全部媒体
   await page.keyboard.press('Tab') // 选择模板
-  await assertFocusIsVisible(picker().getByLabel('选择模板'))
+  await assertFocusIsVisible(templateSelect)
   await selectTemplate('共享构图')
   await picker().getByLabel('人物', { exact: true }).fill('小林')
   await picker().getByRole('button', { name: '填入改稿要求' }).click()
